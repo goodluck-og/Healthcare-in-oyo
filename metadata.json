@@ -1,0 +1,6 @@
+{
+  "name": "HealthConnect Africa",
+  "description": "Connected healthcare discovery, clinical consultations, AI health guidance, emergency dispatch coordination, and vital monitoring across Nigeria and Africa.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

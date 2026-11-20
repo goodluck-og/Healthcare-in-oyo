@@ -1,0 +1,452 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Operational user account metadata and RBAC role assignment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["patient", "doctor", "hospital", "administrator"] },
+        "verifiedRoleStatus": { "type": "string", "enum": ["active", "pending_verification", "suspended"] },
+        "city": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "facilityOrSpecialty": { "type": "string", "maxLength": 120 },
+        "medicalHistory": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "verifiedRoleStatus", "city", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII and verification flags restricted to owner and administrators.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "address": { "type": "string", "maxLength": 240 },
+        "emailVerified": { "type": "boolean" },
+        "smsVerified": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "emailVerified", "smsVerified", "updatedAt"]
+    },
+    "RoleRequest": {
+      "title": "RoleRequest",
+      "description": "Clinician or hospital verification application reviewed by administrators.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "applicantName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "requestedRole": { "type": "string", "enum": ["doctor", "hospital"] },
+        "licenseRef": { "type": "string", "minLength": 3, "maxLength": 80 },
+        "organization": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "applicantName", "requestedRole", "licenseRef", "organization", "status", "createdAt", "updatedAt"]
+    },
+    "FamilyProfile": {
+      "title": "FamilyProfile",
+      "description": "Patient or dependent health profile.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "relationship": { "type": "string", "enum": ["Self (Primary)", "Child Dependent", "Parent"] },
+        "age": { "type": "number" },
+        "gender": { "type": "string", "maxLength": 32 },
+        "city": { "type": "string", "maxLength": 60 },
+        "bloodGroup": { "type": "string", "maxLength": 8 },
+        "genotype": { "type": "string", "maxLength": 8 },
+        "allergies": { "type": "array" },
+        "hmoProvider": { "type": "string", "maxLength": 120 },
+        "demoMemberId": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "fullName", "relationship", "age", "city", "bloodGroup", "genotype", "createdAt", "updatedAt"]
+    },
+    "BloodPressureReading": {
+      "title": "BloodPressureReading",
+      "description": "Manual blood pressure log entered from a validated medical cuff.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "systolic": { "type": "number" },
+        "diastolic": { "type": "number" },
+        "pulse": { "type": "number" },
+        "recordedAt": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "note": { "type": "string", "maxLength": 240 },
+        "deviceType": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "sharedWithDoctorUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "systolic", "diastolic", "pulse", "recordedAt", "deviceType", "createdAt"]
+    },
+    "GlucoseReading": {
+      "title": "GlucoseReading",
+      "description": "Manual blood glucose measurement logged from a glucometer.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "valueMgDl": { "type": "number" },
+        "context": { "type": "string", "enum": ["Fasting", "Before Meal", "Post-Meal (2h)", "Random"] },
+        "recordedAt": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "note": { "type": "string", "maxLength": 240 },
+        "deviceType": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "sharedWithDoctorUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "valueMgDl", "context", "recordedAt", "deviceType", "createdAt"]
+    },
+    "MedicalDocument": {
+      "title": "MedicalDocument",
+      "description": "Patient clinical document metadata and plain-language summary.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "category": { "type": "string", "enum": ["Condition", "Lab Report", "Imaging", "Immunization", "Discharge Summary", "Prescription"] },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "issuer": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "plainSummary": { "type": "string", "minLength": 2, "maxLength": 600 },
+        "attachmentDataUrl": { "type": "string", "maxLength": 400000 },
+        "attachmentName": { "type": "string", "maxLength": 140 },
+        "sharedWithDoctorUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "title", "category", "date", "issuer", "plainSummary", "createdAt"]
+    },
+    "AppointmentRecord": {
+      "title": "AppointmentRecord",
+      "description": "Patient consultation appointment with doctor and facility routing.",
+      "type": "object",
+      "properties": {
+        "patientUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "hospitalUid": { "type": "string", "maxLength": 128 },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "doctorId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "doctorName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "specialty": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "facilityName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "time": { "type": "string", "minLength": 2, "maxLength": 32 },
+        "mode": { "type": "string", "enum": ["In-Person", "Video Telehealth"] },
+        "status": { "type": "string", "enum": ["Confirmed", "Pending Payment", "Completed", "Rescheduled", "Cancelled"] },
+        "feeNgn": { "type": "number" },
+        "reference": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "clinicalNotes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientUid", "profileId", "doctorId", "doctorName", "specialty", "facilityName", "city", "date", "time", "mode", "status", "feeNgn", "reference", "createdAt", "updatedAt"]
+    },
+    "EmergencyRequestRecord": {
+      "title": "EmergencyRequestRecord",
+      "description": "Emergency SOS triage and ambulance workflow tracking.",
+      "type": "object",
+      "properties": {
+        "patientUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hospitalUid": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["SOS Medical Triage", "Ambulance Dispatch Request"] },
+        "stage": { "type": "string", "enum": ["submitted", "accepted", "dispatched", "resolved"] },
+        "patientName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "locationLabel": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "assignedHospital": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "partnerUnit": { "type": "string", "maxLength": 140 },
+        "etaMinutes": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientUid", "type", "stage", "patientName", "locationLabel", "assignedHospital", "etaMinutes", "createdAt", "updatedAt"]
+    },
+    "TransactionRecord": {
+      "title": "TransactionRecord",
+      "description": "Interswitch payment ledger record.",
+      "type": "object",
+      "properties": {
+        "patientUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reference": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "description": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "category": { "type": "string", "enum": ["Subscription", "Consultation", "Laboratory", "Pharmacy", "Equipment Rental", "Wallet Top-Up"] },
+        "amountNgn": { "type": "number" },
+        "date": { "type": "string", "maxLength": 32 },
+        "method": { "type": "string", "enum": ["Interswitch Card", "Interswitch Bank Transfer", "Interswitch USSD", "HealthConnect Wallet"] },
+        "status": { "type": "string", "enum": ["Paid (Demo Sandbox)", "Paid via Wallet", "Pending Verification", "Verified", "Refunded to Wallet"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientUid", "reference", "description", "category", "amountNgn", "date", "method", "status", "createdAt"]
+    },
+    "EmergencyContact": {
+      "title": "EmergencyContact",
+      "description": "Patient emergency contact entry.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "relationship": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "phone": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "city": { "type": "string", "maxLength": 60 },
+        "isPrimary": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "name", "relationship", "phone", "city", "isPrimary", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only audit trail for sensitive health, role, emergency, and payment events.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorRole": { "type": "string", "enum": ["patient", "doctor", "hospital", "administrator"] },
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetPath": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUid", "actorRole", "action", "targetPath", "summary", "createdAt"]
+    },
+    "AiConsultation": {
+      "title": "AiConsultation",
+      "description": "Stored AI health assistant conversation summary owned by the patient.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "mode": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "topic": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "userPrompt": { "type": "string", "minLength": 2, "maxLength": 600 },
+        "assistantSummary": { "type": "string", "minLength": 2, "maxLength": 1800 },
+        "provider": { "type": "string", "enum": ["gemini", "openrouter"] },
+        "model": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "messageCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "mode", "topic", "userPrompt", "assistantSummary", "provider", "model", "messageCount", "createdAt"]
+    },
+    "MedicationReminder": {
+      "title": "MedicationReminder",
+      "description": "Scheduled daily health and medication notification owned by the patient.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "dosage": { "type": "string", "maxLength": 80 },
+        "category": { "type": "string", "enum": ["Medication", "BP Check", "Glucose Check", "Hydration & Wellness", "Appointment"] },
+        "timeOfDay": { "type": "string", "minLength": 4, "maxLength": 16 },
+        "frequency": { "type": "string", "enum": ["Daily", "Twice Daily", "Weekdays", "Weekends", "Weekly"] },
+        "schedule": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "notes": { "type": "string", "maxLength": 240 },
+        "enabled": { "type": "boolean" },
+        "lastTakenDate": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "title", "category", "timeOfDay", "frequency", "schedule", "enabled", "createdAt", "updatedAt"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Append-only patient wallet ledger entry recording appointment refunds, top-ups, and wallet payments.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["credit", "debit"] },
+        "source": { "type": "string", "enum": ["Appointment Refund", "Wallet Top-Up", "Subscription Payment", "Consultation Payment", "Laboratory Payment", "Pharmacy Payment", "Equipment Rental Payment"] },
+        "amountNgn": { "type": "number" },
+        "description": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "reference": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "relatedAppointmentId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "type", "source", "amountNgn", "description", "reference", "date", "createdAt"]
+    },
+    "RehabSession": {
+      "title": "RehabSession",
+      "description": "Clinician-approved physiotherapy and rehabilitation progress session log.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "exerciseName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "bodyArea": { "type": "string", "enum": ["Knee & Lower Limb", "Back & Spine", "Shoulder & Arm", "Post-Stroke Mobility", "Pelvic & Postpartum", "Cardiopulmonary"] },
+        "assignedByClinician": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "targetPrescription": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "durationMinutes": { "type": "number" },
+        "painScore": { "type": "number" },
+        "mobilityScore": { "type": "number" },
+        "completedDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "sharedWithDoctorUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "exerciseName", "bodyArea", "assignedByClinician", "targetPrescription", "durationMinutes", "painScore", "mobilityScore", "completedDate", "createdAt"]
+    },
+    "CycleLog": {
+      "title": "CycleLog",
+      "description": "Private owner-only menstrual cycle, PCOS, and sensitive symptom log.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "startDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "cycleLengthDays": { "type": "number" },
+        "flowIntensity": { "type": "string", "enum": ["Spotting", "Light", "Moderate", "Heavy"] },
+        "symptoms": { "type": "array", "description": "Up to 10 cycle or sensitive symptom labels." },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "startDate", "cycleLengthDays", "flowIntensity", "createdAt"]
+    },
+    "VaccinationRecord": {
+      "title": "VaccinationRecord",
+      "description": "Age-grouped vaccination record tracking 0-5, 10-15, and 15+ immunisations.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "vaccineName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "ageGroup": { "type": "string", "enum": ["0-5", "10-15", "15+"] },
+        "doseLabel": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "status": { "type": "string", "enum": ["Completed", "Scheduled", "Due Soon"] },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "facilityName": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 240 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "vaccineName", "ageGroup", "doseLabel", "status", "date", "createdAt", "updatedAt"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Official Interswitch Web Checkout payment record without card or CVV storage.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "order_id": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "transaction_reference": { "type": "string", "minLength": 6, "maxLength": 80 },
+        "merchant_code": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["566"] },
+        "payment_provider": { "type": "string", "enum": ["interswitch"] },
+        "payment_status": { "type": "string", "enum": ["PENDING", "PAID", "FAILED", "CANCELLED", "AMOUNT_MISMATCH", "UNCONFIGURED"] },
+        "payment_method": { "type": "string", "maxLength": 60 },
+        "customer_email": { "type": "string", "maxLength": 160 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "verified_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "order_id", "transaction_reference", "merchant_code", "amount", "currency", "payment_provider", "payment_status", "customer_email", "created_at", "updated_at"]
+    },
+    "WebhookEventRecord": {
+      "title": "WebhookEventRecord",
+      "description": "Deduplicated Interswitch webhook delivery log (admin read-only).",
+      "type": "object",
+      "properties": {
+        "event_id": { "type": "string", "minLength": 4, "maxLength": 128 },
+        "event_type": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "transaction_reference": { "type": "string", "minLength": 4, "maxLength": 80 },
+        "processing_status": { "type": "string", "enum": ["PROCESSED", "DUPLICATE_IGNORED", "VERIFICATION_PENDING", "FAILED"] },
+        "received_at": { "type": "string", "format": "date-time" },
+        "processed_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["event_id", "event_type", "transaction_reference", "processing_status", "received_at"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "User RBAC profile metadata."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "PII isolated private user contact details."
+    },
+    "/admins/{adminId}": {
+      "schema": "UserAccount",
+      "description": "Administrator role registry."
+    },
+    "/roleRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/RoleRequest" },
+      "description": "Doctor and hospital verification applications."
+    },
+    "/familyProfiles/{profileId}": {
+      "schema": { "$ref": "#/entities/FamilyProfile" },
+      "description": "Patient and dependent health profiles."
+    },
+    "/bpReadings/{readingId}": {
+      "schema": { "$ref": "#/entities/BloodPressureReading" },
+      "description": "Manual blood pressure logs."
+    },
+    "/glucoseReadings/{readingId}": {
+      "schema": { "$ref": "#/entities/GlucoseReading" },
+      "description": "Manual blood glucose logs."
+    },
+    "/medicalDocuments/{docId}": {
+      "schema": { "$ref": "#/entities/MedicalDocument" },
+      "description": "Patient clinical records and plain-language summaries."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/AppointmentRecord" },
+      "description": "Booked clinical consultations."
+    },
+    "/emergencyRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/EmergencyRequestRecord" },
+      "description": "Emergency SOS and ambulance dispatch records."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/TransactionRecord" },
+      "description": "Interswitch payment records."
+    },
+    "/emergencyContacts/{contactId}": {
+      "schema": { "$ref": "#/entities/EmergencyContact" },
+      "description": "Patient emergency contact entries."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable security & clinical audit logs."
+    },
+    "/aiConsultations/{consultationId}": {
+      "schema": { "$ref": "#/entities/AiConsultation" },
+      "description": "Patient AI health assistant consultation history summaries."
+    },
+    "/medicationReminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/MedicationReminder" },
+      "description": "Scheduled daily medication and health reminders with active/paused status toggles."
+    },
+    "/walletTransactions/{entryId}": {
+      "schema": { "$ref": "#/entities/WalletTransaction" },
+      "description": "Immutable patient wallet ledger for appointment cancellation refunds, top-ups, and wallet payments."
+    },
+    "/rehabSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/RehabSession" },
+      "description": "Patient physiotherapy and rehabilitation progress logs with clinician sharing consent."
+    },
+    "/cycleLogs/{logId}": {
+      "schema": { "$ref": "#/entities/CycleLog" },
+      "description": "Private owner-only menstruation, PCOS, and sensitive symptom records."
+    },
+    "/vaccinationRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/VaccinationRecord" },
+      "description": "Age-grouped immunisation records (0-5, 10-15, 15+)."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PaymentRecord" },
+      "description": "Server-verified Interswitch Web Checkout payment records."
+    },
+    "/webhookEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/WebhookEventRecord" },
+      "description": "Deduplicated Interswitch webhook delivery events (admin read-only)."
+    }
+  }
+}
