@@ -415,15 +415,25 @@ export function DnaHelix3D({ className = '' }: DnaHelix3DProps) {
     domEl.addEventListener('pointerup', onPointerUp);
     domEl.addEventListener('pointercancel', onPointerUp);
 
+    let resizeRafId = 0;
+    let lastWidth = 0;
+    let lastHeight = 0;
     const resizeObserver = new ResizeObserver((entries) => {
       if (!renderer) return;
-      for (const entry of entries) {
-        const w = Math.max(entry.contentRect.width, 280);
-        const h = Math.max(entry.contentRect.height, 300);
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      const w = Math.round(Math.max(entry.contentRect.width, 280));
+      const h = Math.round(Math.max(entry.contentRect.height, 300));
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      if (resizeRafId) cancelAnimationFrame(resizeRafId);
+      resizeRafId = requestAnimationFrame(() => {
+        if (disposed || !renderer) return;
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         renderer.setSize(w, h, false);
-      }
+      });
     });
     resizeObserver.observe(container);
 
@@ -475,6 +485,7 @@ export function DnaHelix3D({ className = '' }: DnaHelix3DProps) {
     return () => {
       disposed = true;
       cancelAnimationFrame(rafId);
+      if (resizeRafId) cancelAnimationFrame(resizeRafId);
       if (timeoutId) clearTimeout(timeoutId);
       resizeObserver.disconnect();
       domEl.removeEventListener('pointerdown', onPointerDown);

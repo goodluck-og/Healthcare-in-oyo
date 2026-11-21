@@ -3,17 +3,17 @@ import {
   createAuthMiddleware,
   type AuthenticatedRequest,
   type TokenVerifier,
-} from './middleware/auth';
+} from './middleware/auth.ts';
 import {
   createRateLimiter,
   secureCorsMiddleware,
   securityHeadersMiddleware,
-} from './middleware/security';
-import { createAiRouter } from './routes/aiRoutes';
-import { createHealthRouter } from './routes/healthRoutes';
-import { createPaymentRouter } from './routes/paymentRoutes';
-import { createVerificationRouter } from './routes/verificationRoutes';
-import type { FetchLike } from './services/paymentService';
+} from './middleware/security.ts';
+import { createAiRouter } from './routes/aiRoutes.ts';
+import { createHealthRouter } from './routes/healthRoutes.ts';
+import { createPaymentRouter } from './routes/paymentRoutes.ts';
+import { createVerificationRouter } from './routes/verificationRoutes.ts';
+import type { FetchLike } from './services/paymentService.ts';
 
 export interface CreateAppOptions {
   tokenVerifier?: TokenVerifier;

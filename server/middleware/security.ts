@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { getServerConfig } from '../config/env';
-import { recordServerAudit } from '../services/auditService';
+import { getServerConfig } from '../config/env.ts';
+import { recordServerAudit } from '../services/auditService.ts';
 
 /**
  * Security headers middleware protecting against XSS, clickjacking, MIME sniffing,
@@ -26,10 +26,11 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
     "frame-ancestors 'self' https://aistudio.google.com https://*.google.com https://*.usercontent.goog https://*.run.app https://*.cloud.google.com",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://newwebpay-sandbox.interswitchng.com https://newwebpay.interswitchng.com https://apis.google.com https://www.gstatic.com https://accounts.google.com https://*.firebaseapp.com https://maps.googleapis.com",
     "worker-src 'self' blob:",
+    "manifest-src 'self'",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://*.googleusercontent.com https://*.gstatic.com https://*.google.com https://maps.gstatic.com https://maps.googleapis.com",
-    "connect-src 'self' ws: wss: https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://www.gstatic.com https://accounts.google.com https://apis.google.com https://*.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://sandbox.interswitchng.com https://webpay.interswitchng.com https://newwebpay-sandbox.interswitchng.com https://newwebpay.interswitchng.com",
+    "connect-src 'self' ws: wss: https://*.googleapis.com https://firebasevertexai.googleapis.com https://generativelanguage.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://www.gstatic.com https://accounts.google.com https://apis.google.com https://*.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://sandbox.interswitchng.com https://webpay.interswitchng.com https://newwebpay-sandbox.interswitchng.com https://newwebpay.interswitchng.com",
     "frame-src 'self' https://newwebpay-sandbox.interswitchng.com https://newwebpay.interswitchng.com https://*.firebaseapp.com https://accounts.google.com https://*.google.com",
   ];
   res.setHeader('Content-Security-Policy', cspDirectives.join('; '));

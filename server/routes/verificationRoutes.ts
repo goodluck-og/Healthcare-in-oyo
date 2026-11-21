@@ -1,8 +1,8 @@
 import { Router, type RequestHandler } from 'express';
-import { type AuthenticatedRequest } from '../middleware/auth';
-import { recordServerAudit } from '../services/auditService';
-import { sendSmsVerificationOtp, verifySmsVerificationOtp } from '../services/verificationService';
-import { smsOtpSendSchema, smsOtpVerifySchema } from '../validators/schemas';
+import { type AuthenticatedRequest } from '../middleware/auth.ts';
+import { recordServerAudit } from '../services/auditService.ts';
+import { sendSmsVerificationOtp, verifySmsVerificationOtp } from '../services/verificationService.ts';
+import { smsOtpSendSchema, smsOtpVerifySchema } from '../validators/schemas.ts';
 
 export function createVerificationRouter(requireAuthMiddleware: RequestHandler) {
   const router = Router();

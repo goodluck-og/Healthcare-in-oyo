@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Menu, X, PhoneCall, User, LogOut } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import type { AppRoute } from '../../types/healthcare';
 
 interface NavLinkItem {
@@ -59,9 +60,12 @@ export function Navbar() {
           <span className="sm:hidden">HealthConnect Oyo</span>
         </button>
 
-        {/* Zone 2: Desktop Links (Only Home visible until signed in; full app links once signed in) */}
+        {/* Zone 2: Desktop Links (Home & Hybrid AI available offline/publicly; full links once signed in) */}
         <nav aria-label="Primary navigation" className="hidden xl:flex items-center gap-6">
-          {(user.signedIn ? DESKTOP_LINKS : DESKTOP_LINKS.slice(0, 1)).map((item) => {
+          {(user.signedIn
+            ? DESKTOP_LINKS
+            : DESKTOP_LINKS.filter((item) => item.route === '/' || item.route === '/ai-assistant')
+          ).map((item) => {
             const isActive =
               item.hash === undefined && route === item.route;
             const isEmergency = item.route === '/emergency';
@@ -89,7 +93,8 @@ export function Navbar() {
         {/* Zone 3: Desktop Actions & Mobile Controls */}
         <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
           {/* Desktop Account Controls */}
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2.5">
+            <PWAInstallButton variant="navbar" />
             {user.signedIn ? (
               <>
                 <button
@@ -168,7 +173,10 @@ export function Navbar() {
           className="xl:hidden border-t border-[#272757]/10 bg-white px-4 py-5 space-y-4 shadow-xl"
         >
           <nav aria-label="Mobile menu links" className="grid grid-cols-1 gap-1.5">
-            {(user.signedIn ? DESKTOP_LINKS : DESKTOP_LINKS.slice(0, 1)).map((item) => (
+            {(user.signedIn
+              ? DESKTOP_LINKS
+              : DESKTOP_LINKS.filter((item) => item.route === '/' || item.route === '/ai-assistant')
+            ).map((item) => (
               <button
                 key={item.label}
                 type="button"
@@ -219,6 +227,10 @@ export function Navbar() {
               </>
             )}
           </nav>
+
+          <div className="pt-2">
+            <PWAInstallButton variant="drawer" onAction={() => setDrawerOpen(false)} />
+          </div>
 
           {user.signedIn ? (
             <div className="pt-3 border-t border-[#272757]/10">

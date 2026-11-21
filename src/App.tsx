@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Activity,
   ArrowRight,
@@ -10,6 +10,8 @@ import { AppProvider, useApp } from './context/AppContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
+import { MobileBottomNav } from './components/layout/MobileBottomNav';
+import { OfflineIndicator } from './components/pwa/OfflineIndicator';
 import { HeroSection } from './components/hero/HeroSection';
 import { FindHealthcarePage } from './pages/FindHealthcarePage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -21,6 +23,7 @@ import { CheckoutPage } from './pages/CheckoutPage';
 import { PaymentResponsePage } from './pages/PaymentResponsePage';
 import { AboutPage } from './pages/AboutPage';
 import { AuthPage } from './pages/AuthPage';
+import { syncPublicHealthLibraryToIndexedDb } from './services/offlineLibraryStore';
 import type { AppRoute } from './types/healthcare';
 
 const DEDICATED_CARE_ROUTES: Array<{
@@ -123,11 +126,16 @@ function DedicatedCareDirectoryStrip() {
 function MainShell() {
   const { route, user, authLoading } = useApp();
 
+  useEffect(() => {
+    void syncPublicHealthLibraryToIndexedDb();
+  }, []);
+
   const isPublicRoute =
     route === '/' ||
     route === '/login' ||
     route === '/register' ||
-    route === '/payment-response';
+    route === '/payment-response' ||
+    route === '/ai-assistant';
 
   const renderPage = () => {
     if (!user.signedIn && !isPublicRoute) {
@@ -178,8 +186,10 @@ function MainShell() {
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0A33] text-[#0F0E47]">
       <Navbar />
-      <main className="flex-1">{renderPage()}</main>
+      <OfflineIndicator />
+      <main className="flex-1 pb-16 md:pb-0">{renderPage()}</main>
       <Footer />
+      <MobileBottomNav />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPublicIntegrationStatus } from '../config/env';
+import { getPublicIntegrationStatus } from '../config/env.ts';
 
 export function createHealthRouter() {
   const router = Router();

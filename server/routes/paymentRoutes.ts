@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from 'express';
-import { type AuthenticatedRequest } from '../middleware/auth';
-import { recordServerAudit } from '../services/auditService';
+import { type AuthenticatedRequest } from '../middleware/auth.ts';
+import { recordServerAudit } from '../services/auditService.ts';
 import {
   getAdminPaymentDashboardSummary,
   initializeInterswitchPayment,
@@ -10,13 +10,13 @@ import {
   verifyInterswitchTransactionByRef,
   type FetchLike,
   type InterswitchWebhookPayload,
-} from '../services/paymentService';
+} from '../services/paymentService.ts';
 import {
   interswitchInitSchema,
   interswitchRefParamSchema,
   paymentInitSchema,
   paymentVerifySchema,
-} from '../validators/schemas';
+} from '../validators/schemas.ts';
 
 export interface PaymentRouterOptions {
   requireAuth: RequestHandler;

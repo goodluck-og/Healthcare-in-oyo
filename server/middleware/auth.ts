@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getServerConfig } from '../config/env';
-import { recordServerAudit } from '../services/auditService';
+import { getServerConfig } from '../config/env.ts';
+import { recordServerAudit } from '../services/auditService.ts';
 
 export interface AuthenticatedRequest extends Request {
   rawBody?: string;

@@ -1,31 +1,66 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowUpRight,
   BookmarkCheck,
   BookmarkPlus,
+  BookOpen,
   Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
-  FileText,
+  Cloud,
+  Cpu,
   History,
   Loader2,
+  Lock,
   MessageSquare,
   MessageSquarePlus,
   Mic,
   MicOff,
+  PhoneCall,
   RotateCcw,
   Search,
   Send,
   ShieldAlert,
+  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   User,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { callAiHealthAssistant } from '../services/apiClient';
 import { AnatomyExplorer } from '../components/ai/AnatomyExplorer';
+import { OfflineHealthLibraryPanel } from '../components/ai/OfflineHealthLibraryPanel';
+import { AiConsentModal } from '../components/ai/AiConsentModal';
+import {
+  OFFLINE_HEALTH_LIBRARY,
+  type OfflineHealthGuide,
+} from '../data/offlineHealthLibrary';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import {
+  detectOnDeviceAiCapability,
+  type OnDeviceCapabilityInfo,
+} from '../services/firebaseHybridAi';
+import {
+  routeHybridHealthQuery,
+  type ActualAiProcessingPath,
+  type CitedOfflineGuide,
+} from '../services/hybridAiRouter';
+import type { UrgentRedFlagAssessment } from '../services/localHealthAi';
+import {
+  AI_CONSENT_POLICY_VERSION,
+  loadAiPrivacyPreferences,
+  loadBookmarkedGuideIds,
+  loadPublicHealthGuides,
+  saveAiPrivacyPreferences,
+  saveBookmarkedGuideIds,
+  type AiPrivacyPreferences,
+  type HybridRoutingPreference,
+} from '../services/offlineLibraryStore';
 import type { AiConsultation } from '../types/healthcare';
 
 interface SpeechRecognitionAlternativeLike {
@@ -85,19 +120,31 @@ function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null 
   return win.SpeechRecognition || win.webkitSpeechRecognition || null;
 }
 
-interface Message {
+interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  actualPath?: ActualAiProcessingPath;
+  indicatorLabel?: string;
+  indicatorDetail?: string;
   provider?: string;
   model?: string;
+  latencyMs?: number;
+  redFlag?: UrgentRedFlagAssessment;
+  citedGuides?: CitedOfflineGuide[];
+  profileContextSharedWithCloud?: boolean;
+  fallbackNotice?: string;
+  promptForEscalation?: string;
 }
 
-const WELCOME_MESSAGE: Message = {
+const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    'Hello! I am the HealthConnect Oyo State AI Health Information Assistant. I can help you understand medical terms or lab reports, prepare for online doctor consultations and physical exams in Oyo State, or organise vital reminders.\n\nImportant: I provide general health information only and do not diagnose conditions or replace a qualified doctor, pharmacist, or emergency team.',
+    'Hello! I am the HealthConnect Oyo State Hybrid AI Health Assistant. I combine on-device intelligence and an 18-chapter offline WHO & Nigeria Health Reference Library with secure Cloud AI for deeper explanations when you are online.\n\nImportant: I provide general health education only — never a confirmed medical diagnosis or prescription. For emergencies, call 112 immediately.',
+  actualPath: 'local-library',
+  indicatorLabel: 'Local AI: Ready on your device',
+  indicatorDetail: '18 WHO & Nigeria health guides cached locally for instant offline access.',
 };
 
 const ASSISTANT_MODES = [
@@ -114,10 +161,33 @@ const OPENROUTER_MODELS = [
 ] as const;
 
 const QUICK_PROMPTS = [
+  'What do normal blood pressure readings mean and when is BP an emergency?',
+  'Explain malaria RDT testing, ACT medicines, and typhoid warning signs in Nigeria.',
   'Explain what HbA1c 5.4% and Total Cholesterol 184 mg/dL mean in plain language.',
-  'What questions should I ask my cardiologist about my recent blood pressure readings?',
-  'Which healthcare services on HealthConnect Oyo State support maternal & child wellness in Ibadan or Ogbomoso?',
-  'Help me structure a daily medication and blood pressure check reminder routine.',
+  'What are the BE-FAST signs of stroke and emergency first aid steps?',
+  'How do I manage PCOS symptoms and track cycles on HealthConnect Oyo State?',
+];
+
+const ROUTING_MODE_OPTIONS: Array<{
+  id: HybridRoutingPreference;
+  label: string;
+  shortDesc: string;
+}> = [
+  {
+    id: 'smart-hybrid',
+    label: 'Smart Hybrid',
+    shortDesc: 'Local AI first for speed & privacy; Cloud AI for complex care questions.',
+  },
+  {
+    id: 'local-only',
+    label: 'Local Only',
+    shortDesc: '100% on-device Gemini Nano & Offline Health Library. Zero cloud transfer.',
+  },
+  {
+    id: 'cloud-only',
+    label: 'Cloud AI',
+    shortDesc: 'Online deeper reasoning (falls back safely to local guides if offline).',
+  },
 ];
 
 function deriveConsultationTopic(prompt: string, fallbackMode: string): string {
@@ -146,6 +216,41 @@ function formatConsultationDate(iso: string): string {
   }
 }
 
+function getPathStyle(path?: ActualAiProcessingPath) {
+  switch (path) {
+    case 'local-on-device':
+      return {
+        textClass: 'text-[#15803D]',
+        icon: Cpu,
+      };
+    case 'local-library':
+      return {
+        textClass: 'text-[#15803D]',
+        icon: BookOpen,
+      };
+    case 'hybrid':
+      return {
+        textClass: 'text-[#4B50D6]',
+        icon: Sparkles,
+      };
+    case 'cloud':
+      return {
+        textClass: 'text-[#1D4ED8]',
+        icon: Cloud,
+      };
+    case 'offline-library':
+      return {
+        textClass: 'text-[#B45309]',
+        icon: WifiOff,
+      };
+    default:
+      return {
+        textClass: 'text-[#505081]',
+        icon: Bot,
+      };
+  }
+}
+
 export function AiAssistantPage() {
   const {
     navigate,
@@ -162,18 +267,47 @@ export function AiAssistantPage() {
     isGuestDemo,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
+  const { isOnline } = useOnlineStatus();
+
+  const [activeTab, setActiveTab] = useState<'chat' | 'library' | 'history'>('chat');
+  const [showMobileSettings, setShowMobileSettings] = useState(false);
+  const [showOfflineMatrix, setShowOfflineMatrix] = useState(false);
+
+  // Hybrid AI & NDPA Consent preferences (persisted in IndexedDB / localStorage)
+  const [privacyPrefs, setPrivacyPrefs] = useState<AiPrivacyPreferences>({
+    routingPreference: 'smart-hybrid',
+    cloudConsentGranted: false,
+    cloudConsentTimestamp: null,
+    cloudConsentVersion: AI_CONSENT_POLICY_VERSION,
+  });
+  const [includeProfileContext, setIncludeProfileContext] = useState(false);
+  const [consentModalOpen, setConsentModalOpen] = useState(false);
+
+  // Device capability & offline library state
+  const [onDeviceCapability, setOnDeviceCapability] = useState<OnDeviceCapabilityInfo>({
+    status: 'unavailable',
+    label: 'Checking on-device AI capability...',
+    detail: 'Offline WHO & Nigeria Health Library is ready.',
+    browserSupportsPromptApi: false,
+  });
+  const [offlineGuides, setOfflineGuides] = useState<OfflineHealthGuide[]>(OFFLINE_HEALTH_LIBRARY);
+  const [bookmarkedGuideIds, setBookmarkedGuideIds] = useState<string[]>([]);
+
+  // Cloud provider & assistant mode state
   const [provider, setProvider] = useState<'gemini' | 'openrouter'>('gemini');
   const [openRouterModel, setOpenRouterModel] = useState<
     'openai/gpt-4o' | 'google/gemini-2.5-flash'
   >('openai/gpt-4o');
   const [mode, setMode] = useState<string>(ASSISTANT_MODES[0]);
-  const [includeProfileContext, setIncludeProfileContext] = useState(true);
+
+  // Chat state
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+
+  // Voice dictation state
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -195,8 +329,27 @@ export function AiAssistantPage() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const speechSupported = Boolean(getSpeechRecognitionConstructor());
+  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
 
-  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
+  // Hydrate preferences, bookmarks, offline guides, and on-device Gemini Nano capability
+  useEffect(() => {
+    let mounted = true;
+    void loadAiPrivacyPreferences().then((prefs) => {
+      if (mounted) setPrivacyPrefs(prefs);
+    });
+    void loadBookmarkedGuideIds().then((ids) => {
+      if (mounted) setBookmarkedGuideIds(ids);
+    });
+    void loadPublicHealthGuides().then((guides) => {
+      if (mounted && guides.length > 0) setOfflineGuides(guides);
+    });
+    void detectOnDeviceAiCapability().then((cap) => {
+      if (mounted) setOnDeviceCapability(cap);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -253,19 +406,22 @@ export function AiAssistantPage() {
 
   const canSaveConversation = useMemo(
     () =>
+      isOnline &&
+      (user.signedIn || isGuestDemo) &&
       conversationTurns.some((m) => m.role === 'user') &&
       conversationTurns.some((m) => m.role === 'assistant'),
-    [conversationTurns]
+    [conversationTurns, isOnline, user.signedIn, isGuestDemo]
   );
 
-  const buildPatientContext = () => {
-    if (!includeProfileContext || !activeProfile) return '';
+  // Data-minimized clinical context (NDPA-informed: strips full name, phone, address, email)
+  const buildMinimizedPatientContext = () => {
+    if (!includeProfileContext || !privacyPrefs.cloudConsentGranted || !activeProfile) return '';
     const latestBp = bpReadings.find((b) => b.profileId === activeProfile.id);
     const latestGlu = glucoseReadings.find((g) => g.profileId === activeProfile.id);
     const latestLab = labResults.find((l) => l.profileId === activeProfile.id);
 
     return [
-      `Profile: ${activeProfile.fullName} (${activeProfile.age} yrs, ${activeProfile.city}, Blood Group ${activeProfile.bloodGroup}, Genotype ${activeProfile.genotype}, Allergies: ${activeProfile.allergies.join(', ') || 'None recorded'})`,
+      `Minimized Clinical Context: Age ${activeProfile.age} yrs, City: ${activeProfile.city}, Blood Group: ${activeProfile.bloodGroup}, Genotype: ${activeProfile.genotype}, Recorded Allergies: ${activeProfile.allergies.join(', ') || 'None recorded'}`,
       latestBp
         ? `Latest BP Log: ${latestBp.systolic}/${latestBp.diastolic} mmHg, Pulse ${latestBp.pulse} bpm (${latestBp.recordedAt})`
         : '',
@@ -278,6 +434,61 @@ export function AiAssistantPage() {
       .join('\n');
   };
 
+  const handleSelectRoutingPreference = async (nextPref: HybridRoutingPreference) => {
+    const updated = await saveAiPrivacyPreferences({
+      ...privacyPrefs,
+      routingPreference: nextPref,
+    });
+    setPrivacyPrefs(updated);
+  };
+
+  const handleToggleProfileContext = (checked: boolean) => {
+    if (!checked) {
+      setIncludeProfileContext(false);
+      return;
+    }
+    if (!privacyPrefs.cloudConsentGranted) {
+      setConsentModalOpen(true);
+      return;
+    }
+    setIncludeProfileContext(true);
+  };
+
+  const handleAcceptConsent = async () => {
+    const updated = await saveAiPrivacyPreferences({
+      ...privacyPrefs,
+      cloudConsentGranted: true,
+      cloudConsentTimestamp: new Date().toISOString(),
+    });
+    setPrivacyPrefs(updated);
+    setIncludeProfileContext(true);
+    setConsentModalOpen(false);
+  };
+
+  const handleRevokeConsent = async () => {
+    const updated = await saveAiPrivacyPreferences({
+      ...privacyPrefs,
+      cloudConsentGranted: false,
+      cloudConsentTimestamp: null,
+    });
+    setPrivacyPrefs(updated);
+    setIncludeProfileContext(false);
+  };
+
+  const handleToggleGuideBookmark = async (guideId: string) => {
+    const exists = bookmarkedGuideIds.includes(guideId);
+    const nextIds = exists
+      ? bookmarkedGuideIds.filter((id) => id !== guideId)
+      : [...bookmarkedGuideIds, guideId];
+    setBookmarkedGuideIds(nextIds);
+    await saveBookmarkedGuideIds(nextIds);
+  };
+
+  const handleAskAboutGuide = (guide: OfflineHealthGuide) => {
+    setActiveTab('chat');
+    void sendMessage(`Summarize the key guidance and warning signs for ${guide.title}.`);
+  };
+
   const persistConsultationSummary = async (params: {
     prompt: string;
     reply: string;
@@ -286,7 +497,12 @@ export function AiAssistantPage() {
     totalTurns: number;
     silent?: boolean;
   }) => {
-    // Only auto-persist to Firestore when signed in & verified (or in guest session)
+    if (!isOnline || (!user.signedIn && !isGuestDemo)) {
+      if (!params.silent) {
+        setSaveFeedback('Sign in while online to archive consultation summaries in Firestore.');
+      }
+      return;
+    }
     if (user.signedIn && !user.emailVerified) {
       if (!params.silent) {
         setSaveFeedback('Verify your email in Dashboard to archive consultations in Firestore.');
@@ -303,9 +519,7 @@ export function AiAssistantPage() {
         userPrompt: params.prompt,
         assistantSummary: params.reply,
         provider: params.replyProvider === 'openrouter' ? 'openrouter' : 'gemini',
-        model:
-          params.replyModel ||
-          (provider === 'openrouter' ? openRouterModel : 'gemini-3.1-flash-lite'),
+        model: params.replyModel || 'Hybrid Health AI',
         messageCount: Math.max(2, params.totalTurns),
       });
       setSaveFeedback(
@@ -322,7 +536,15 @@ export function AiAssistantPage() {
     }
   };
 
-  const sendMessage = async (textToSend?: string, options?: { isRetry?: boolean }) => {
+  const selectedProviderConfigured =
+    provider === 'gemini'
+      ? integrationStatus.geminiConfigured
+      : integrationStatus.openrouterConfigured;
+
+  const sendMessage = async (
+    textToSend?: string,
+    options?: { isRetry?: boolean; forceCloudEscalation?: boolean }
+  ) => {
     const content = (textToSend ?? input).trim();
     if (!content || loading) return;
 
@@ -341,8 +563,8 @@ export function AiAssistantPage() {
     setLastFailedPrompt(null);
 
     let updatedHistory = messages;
-    if (!options?.isRetry) {
-      const userMsg: Message = {
+    if (!options?.isRetry && !options?.forceCloudEscalation) {
+      const userMsg: ChatMessage = {
         id: `u-${Date.now()}`,
         role: 'user',
         content,
@@ -355,42 +577,61 @@ export function AiAssistantPage() {
     setLoadingSeconds(0);
 
     try {
-      const response = await callAiHealthAssistant({
-        provider,
-        model: provider === 'openrouter' ? openRouterModel : undefined,
+      const hybridResponse = await routeHybridHealthQuery({
+        prompt: content,
         mode,
-        patientContext: buildPatientContext(),
-        messages: updatedHistory
+        routingPreference: privacyPrefs.routingPreference,
+        cloudProvider: provider,
+        openRouterModel,
+        conversationHistory: updatedHistory
           .filter((m) => m.id !== 'welcome')
           .map((m) => ({ role: m.role, content: m.content })),
+        patientContext: buildMinimizedPatientContext(),
+        includeProfileContext,
+        cloudConsentGranted: privacyPrefs.cloudConsentGranted,
+        isOnline,
+        serverCloudConfigured: selectedProviderConfigured,
+        forceCloudEscalation: options?.forceCloudEscalation,
       });
 
-      const assistantMsg: Message = {
+      const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: response.reply,
-        provider: response.provider,
-        model: response.model,
+        content: hybridResponse.reply,
+        actualPath: hybridResponse.actualPath,
+        indicatorLabel: hybridResponse.indicatorLabel,
+        indicatorDetail: hybridResponse.indicatorDetail,
+        provider: hybridResponse.provider,
+        model: hybridResponse.model,
+        latencyMs: hybridResponse.latencyMs,
+        redFlag: hybridResponse.redFlag,
+        citedGuides: hybridResponse.citedGuides,
+        profileContextSharedWithCloud: hybridResponse.profileContextSharedWithCloud,
+        fallbackNotice: hybridResponse.fallbackNotice,
+        promptForEscalation: content,
       };
+
       const nextThread = [...updatedHistory, assistantMsg];
       setMessages(nextThread);
 
-      // Automatically archive completed exchange in Firestore Consultation History
-      const turnCount = nextThread.filter((m) => m.id !== 'welcome').length;
-      void persistConsultationSummary({
-        prompt: content,
-        reply: response.reply,
-        replyProvider: response.provider || provider,
-        replyModel: response.model || (provider === 'openrouter' ? openRouterModel : 'gemini'),
-        totalTurns: turnCount,
-        silent: true,
-      });
+      // Persist online signed-in consultations automatically without blocking offline usage
+      if (isOnline && ((user.signedIn && user.emailVerified) || isGuestDemo)) {
+        const turnCount = nextThread.filter((m) => m.id !== 'welcome').length;
+        void persistConsultationSummary({
+          prompt: content,
+          reply: hybridResponse.reply,
+          replyProvider: hybridResponse.provider,
+          replyModel: hybridResponse.model,
+          totalTurns: turnCount,
+          silent: true,
+        });
+      }
     } catch (err) {
       setLastFailedPrompt(content);
       setErrorMsg(
         err instanceof Error
           ? err.message
-          : 'Could not reach the backend AI gateway (/api/ai/health-assistant).'
+          : 'Unable to complete the health query right now. You can browse the Offline Health Library tab anytime.'
       );
     } finally {
       setLoading(false);
@@ -407,7 +648,7 @@ export function AiAssistantPage() {
       prompt: lastUser.content,
       reply: lastAssistant.content,
       replyProvider: lastAssistant.provider || provider,
-      replyModel: lastAssistant.model || (provider === 'openrouter' ? openRouterModel : 'gemini'),
+      replyModel: lastAssistant.model || 'Hybrid Health AI',
       totalTurns: conversationTurns.length,
       silent: false,
     });
@@ -436,6 +677,9 @@ export function AiAssistantPage() {
         content: item.assistantSummary,
         provider: item.provider,
         model: item.model,
+        actualPath: 'cloud',
+        indicatorLabel: 'Loaded from Consultation History',
+        indicatorDetail: `${item.provider} · ${item.model}`,
       },
     ]);
     setErrorMsg(null);
@@ -575,119 +819,218 @@ export function AiAssistantPage() {
     }
   };
 
-  const selectedProviderConfigured =
-    provider === 'gemini'
-      ? integrationStatus.geminiConfigured
-      : integrationStatus.openrouterConfigured;
-
   return (
-    <div className="min-h-screen bg-[#F5F6FC] py-8 sm:py-10">
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 space-y-6">
-        {/* Top Safety Banner */}
-        <div className="rounded-2xl bg-[#0F0E47] text-white p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <ShieldAlert className="w-5 h-5 text-[#FFB585] shrink-0 mt-0.5" />
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold">HealthConnect AI Health Assistant</h1>
-              <p className="text-xs sm:text-sm text-[#D7D8EE] mt-1 leading-relaxed">
-                Informational guidance only — AI is not a replacement for a qualified doctor,
-                pharmacist, or emergency medical team. For urgent symptoms, contact the Emergency
-                Centre immediately.
-              </p>
+    <div className="min-h-screen bg-[#F5F6FC] py-5 sm:py-8">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 space-y-5">
+        {/* Top Clinical Safety & Hybrid Readiness Header */}
+        <div className="rounded-2xl bg-[#0F0E47] text-white p-4 sm:p-6 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-[#FFB585] shrink-0 mt-0.5" />
+              <div>
+                <h1 className="text-lg sm:text-xl font-bold leading-snug">
+                  HealthConnect Oyo State — Hybrid AI Health Assistant
+                </h1>
+                <p className="text-xs sm:text-sm text-[#D7D8EE] mt-1 leading-relaxed">
+                  General health education only — AI does not provide a medical diagnosis or
+                  prescription. For urgent emergencies across Oyo State, call{' '}
+                  <strong className="text-white">112</strong> or open the Emergency Centre
+                  immediately.
+                </p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => navigate('/emergency')}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-[#E5484D] hover:bg-[#C9363B] text-white text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <PhoneCall className="w-4 h-4" />
+              <span>Emergency Centre (112)</span>
+            </button>
+          </div>
+
+          {/* Unboxed Runtime Capability Strip */}
+          <div className="pt-3 border-t border-white/12 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#D7D8EE]">
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              {isOnline ? (
+                <Wifi className="w-3.5 h-3.5 text-[#6EE7B7]" />
+              ) : (
+                <WifiOff className="w-3.5 h-3.5 text-[#FCD34D]" />
+              )}
+              <span>{isOnline ? 'Online — Hybrid AI Active' : 'Offline Mode — Local AI Active'}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#A5B4FC]" />
+              <span>{onDeviceCapability.label}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <BookOpen className="w-3.5 h-3.5 text-[#6EE7B7]" />
+              <span>{offlineGuides.length} WHO &amp; Nigeria Guides Cached</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-[#FFB585]" />
+              <span>
+                {includeProfileContext && privacyPrefs.cloudConsentGranted
+                  ? 'Minimized Context Enabled'
+                  : 'Profile Context Anonymized'}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Mobile Quick Controls Bar (visible below lg) */}
+        <div className="lg:hidden flex items-center justify-between gap-2 rounded-2xl bg-white border border-[#272757]/12 p-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {ROUTING_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => void handleSelectRoutingPreference(opt.id)}
+                className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                  privacyPrefs.routingPreference === opt.id
+                    ? 'bg-[#0F0E47] text-white'
+                    : 'bg-[#F5F6FC] text-[#505081]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
           <button
             type="button"
-            onClick={() => navigate('/emergency')}
-            className="px-4 py-2.5 min-h-[42px] rounded-xl bg-[#E5484D] hover:bg-[#C9363B] text-white text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+            onClick={() => setShowMobileSettings((prev) => !prev)}
+            aria-expanded={showMobileSettings}
+            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg bg-[#F5F6FC] text-xs font-semibold text-[#272757] shrink-0 cursor-pointer"
           >
-            Go to Emergency Centre
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>{showMobileSettings ? 'Hide' : 'Settings'}</span>
           </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Configuration, Anatomy Explorer & Quick Prompts */}
-          <aside className="lg:col-span-4 space-y-4">
+          {/* Left Configuration, Privacy, Anatomy Explorer & Suggested Topics */}
+          <aside
+            className={`lg:col-span-4 space-y-4 ${
+              showMobileSettings ? 'block' : 'hidden lg:block'
+            }`}
+          >
+            {/* Unified Hybrid AI Routing Card */}
             <div className="rounded-2xl bg-white border border-[#272757]/10 p-5 space-y-4">
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-[#272757]">Server-Side AI Gateway</p>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
-                      selectedProviderConfigured
-                        ? 'bg-[#1D7A4C]/12 text-[#1D7A4C]'
-                        : 'bg-[#E8702A]/12 text-[#9C4410]'
-                    }`}
-                  >
-                    {selectedProviderConfigured ? 'Key Detected' : 'Key Not Configured'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-[#505081] mt-1">
-                  All prompts route through `/api/ai/health-assistant` with Firebase Bearer
-                  authentication and audit logging.
+              <div className="space-y-1">
+                <h2 className="text-sm font-bold text-[#0F0E47]">Hybrid AI Processing Mode</h2>
+                <p className="text-xs text-[#505081] leading-relaxed">
+                  One unified AI router combining Firebase AI Logic on-device inference, local
+                  WHO/Nigeria guides, and secure Cloud AI.
                 </p>
-
-                <div className="grid grid-cols-2 gap-2 mt-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setProvider('gemini')}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                      provider === 'gemini'
-                        ? 'bg-[#272757] text-white'
-                        : 'bg-[#F5F6FC] text-[#505081]'
-                    }`}
-                  >
-                    Gemini ({integrationStatus.geminiConfigured ? 'Ready' : 'Unset'})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProvider('openrouter')}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                      provider === 'openrouter'
-                        ? 'bg-[#272757] text-white'
-                        : 'bg-[#F5F6FC] text-[#505081]'
-                    }`}
-                  >
-                    OpenRouter ({integrationStatus.openrouterConfigured ? 'Ready' : 'Unset'})
-                  </button>
-                </div>
-
-                {provider === 'openrouter' && (
-                  <div className="mt-3">
-                    <label
-                      htmlFor="openrouter-model"
-                      className="block text-[11px] font-semibold text-[#272757] mb-1"
-                    >
-                      OpenRouter Model
-                    </label>
-                    <select
-                      id="openrouter-model"
-                      value={openRouterModel}
-                      onChange={(e) =>
-                        setOpenRouterModel(
-                          e.target.value as 'openai/gpt-4o' | 'google/gemini-2.5-flash'
-                        )
-                      }
-                      className="w-full px-3 py-2 min-h-[40px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs text-[#0F0E47]"
-                    >
-                      {OPENROUTER_MODELS.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {!selectedProviderConfigured && (
-                  <p className="mt-2.5 text-[11px] text-[#9C4410] bg-[#E8702A]/10 border border-[#E8702A]/20 rounded-xl p-2.5 leading-relaxed">
-                    {provider === 'gemini'
-                      ? 'GEMINI_API_KEY is not configured in server secrets. Configure it in Settings > Secrets or switch providers.'
-                      : 'OPENROUTER_API_KEY is not configured in server secrets. Add it in Settings > Secrets (never paste raw secrets into source code).'}
-                  </p>
-                )}
               </div>
 
+              <div className="space-y-2" role="radiogroup" aria-label="AI Processing Mode">
+                {ROUTING_MODE_OPTIONS.map((opt) => {
+                  const selected = privacyPrefs.routingPreference === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => void handleSelectRoutingPreference(opt.id)}
+                      className={`w-full text-left rounded-xl p-3 border transition-colors cursor-pointer ${
+                        selected
+                          ? 'bg-[#0F0E47] text-white border-[#0F0E47]'
+                          : 'bg-[#F5F6FC] text-[#0F0E47] border-[#272757]/10 hover:bg-[#ECEEF9]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold">{opt.label}</span>
+                        {opt.id === 'smart-hybrid' && (
+                          <span
+                            className={`text-[10px] font-semibold ${
+                              selected ? 'text-[#FFB585]' : 'text-[#4B50D6]'
+                            }`}
+                          >
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className={`text-[11px] mt-0.5 leading-relaxed ${
+                          selected ? 'text-[#D7D8EE]' : 'text-[#505081]'
+                        }`}
+                      >
+                        {opt.shortDesc}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Cloud Provider Selection (only when cloud routing is permitted) */}
+              {privacyPrefs.routingPreference !== 'local-only' && (
+                <div className="pt-3 border-t border-[#272757]/10 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-[#272757]">Online Cloud Gateway</p>
+                    <span className="text-[11px] font-medium text-[#505081]">
+                      {selectedProviderConfigured
+                        ? 'Backend Key Ready'
+                        : 'Firebase AI / Local Fallback'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProvider('gemini')}
+                      className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                        provider === 'gemini'
+                          ? 'bg-[#272757] text-white'
+                          : 'bg-[#F5F6FC] text-[#505081]'
+                      }`}
+                    >
+                      Gemini ({integrationStatus.geminiConfigured ? 'Ready' : 'Fallback'})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProvider('openrouter')}
+                      className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                        provider === 'openrouter'
+                          ? 'bg-[#272757] text-white'
+                          : 'bg-[#F5F6FC] text-[#505081]'
+                      }`}
+                    >
+                      OpenRouter ({integrationStatus.openrouterConfigured ? 'Ready' : 'Unset'})
+                    </button>
+                  </div>
+
+                  {provider === 'openrouter' && (
+                    <div>
+                      <label
+                        htmlFor="openrouter-model"
+                        className="block text-[11px] font-semibold text-[#272757] mb-1"
+                      >
+                        OpenRouter Model
+                      </label>
+                      <select
+                        id="openrouter-model"
+                        value={openRouterModel}
+                        onChange={(e) =>
+                          setOpenRouterModel(
+                            e.target.value as 'openai/gpt-4o' | 'google/gemini-2.5-flash'
+                          )
+                        }
+                        className="w-full px-3 py-2 min-h-[42px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs text-[#0F0E47]"
+                      >
+                        {OPENROUTER_MODELS.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Assistant Focus */}
               <div className="pt-3 border-t border-[#272757]/10">
                 <label
                   htmlFor="ai-focus"
@@ -709,31 +1052,97 @@ export function AiAssistantPage() {
                 </select>
               </div>
 
-              <div className="pt-3 border-t border-[#272757]/10">
+              {/* NDPA Privacy & Profile Context Consent Control */}
+              <div className="pt-3 border-t border-[#272757]/10 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-[#272757] flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#15803D]" />
+                    <span>NDPA Privacy &amp; Consent</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setConsentModalOpen(true)}
+                    className="text-[11px] font-semibold text-[#4B50D6] hover:underline cursor-pointer"
+                  >
+                    Privacy Notice
+                  </button>
+                </div>
+
                 <label className="flex items-start gap-2.5 text-xs text-[#0F0E47] cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={includeProfileContext}
-                    onChange={(e) => setIncludeProfileContext(e.target.checked)}
-                    disabled={!activeProfile}
-                    className="mt-0.5 rounded border-[#272757]/30"
+                    checked={includeProfileContext && privacyPrefs.cloudConsentGranted}
+                    onChange={(e) => handleToggleProfileContext(e.target.checked)}
+                    disabled={!activeProfile || privacyPrefs.routingPreference === 'local-only'}
+                    className="mt-0.5 w-4 h-4 rounded border-[#272757]/30 shrink-0"
                   />
-                  <span>
-                    {activeProfile
-                      ? `Include ${isGuestDemo ? 'demonstration' : 'signed-in'} profile context (${activeProfile.fullName.split(' ')[0]} · recent BP/Glucose & labs)`
-                      : 'No profile saved yet — add a health profile in Dashboard to include vitals context.'}
+                  <span className="leading-relaxed">
+                    {privacyPrefs.routingPreference === 'local-only'
+                      ? 'Disabled in Local-Only mode (zero data leaves your device).'
+                      : activeProfile
+                      ? `Share minimized vitals summary (${activeProfile.age}y, ${activeProfile.city}, latest BP/glucose) with online Cloud AI — never sends name, phone, or address.`
+                      : 'Sign in and save a profile in Dashboard to enable optional minimized vitals context.'}
                   </span>
                 </label>
+
+                {privacyPrefs.cloudConsentGranted && (
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-[#505081] bg-[#F5F6FC] rounded-lg px-2.5 py-2">
+                    <span>Consent granted</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleRevokeConsent()}
+                      className="font-semibold text-[#9C2327] hover:underline cursor-pointer"
+                    >
+                      Revoke Consent
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Offline vs. Online Feature Clarity Drawer */}
+              <div className="pt-3 border-t border-[#272757]/10">
+                <button
+                  type="button"
+                  onClick={() => setShowOfflineMatrix((prev) => !prev)}
+                  aria-expanded={showOfflineMatrix}
+                  className="w-full flex items-center justify-between text-xs font-semibold text-[#272757] py-1 cursor-pointer"
+                >
+                  <span>What Works Offline vs. Online</span>
+                  {showOfflineMatrix ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4" />
+                  )}
+                </button>
+                {showOfflineMatrix && (
+                  <div className="mt-2.5 space-y-2 text-[11px] leading-relaxed text-[#505081]">
+                    <p>
+                      <strong className="text-[#15803D]">Fully Offline:</strong> 18 WHO &amp;
+                      Nigeria health guides, Local AI search, medical terms, urgent red-flag alerts,
+                      app navigation help, and on-device Gemini Nano (on supported Chrome).
+                    </p>
+                    <p>
+                      <strong className="text-[#B45309]">Partially Available:</strong> Previously
+                      visited pages and saved guide bookmarks (stored in public IndexedDB).
+                    </p>
+                    <p>
+                      <strong className="text-[#1D4ED8]">Internet-Dependent:</strong> Online Cloud
+                      AI reasoning, Firestore sync, doctor bookings, Interswitch payments, live
+                      maps, and ambulance dispatch.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Interactive Front / Back Anatomy Explorer */}
+            {/* Interactive Front / Back Anatomy Explorer (Preserved) */}
             <AnatomyExplorer onAskRegion={handleAskAnatomyRegion} />
 
+            {/* Suggested Topics */}
             <div className="rounded-2xl bg-white border border-[#272757]/10 p-5 space-y-2.5">
               <p className="text-xs font-semibold text-[#272757] flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-[#E8702A]" />
-                Suggested Topics
+                <span>Try Asking (Works Online &amp; Offline)</span>
               </p>
               <div className="space-y-2">
                 {QUICK_PROMPTS.map((q) => (
@@ -741,8 +1150,8 @@ export function AiAssistantPage() {
                     key={q}
                     type="button"
                     disabled={loading}
-                    onClick={() => sendMessage(q)}
-                    className="w-full text-left rounded-xl bg-[#F5F6FC] hover:bg-[#E8EAF7] disabled:opacity-60 disabled:cursor-not-allowed p-3 text-xs text-[#0F0E47] leading-relaxed transition-colors cursor-pointer"
+                    onClick={() => void sendMessage(q)}
+                    className="w-full text-left rounded-xl bg-[#F5F6FC] hover:bg-[#E8EAF7] disabled:opacity-60 disabled:cursor-not-allowed p-3 min-h-[44px] text-xs text-[#0F0E47] leading-relaxed transition-colors cursor-pointer"
                   >
                     {q}
                   </button>
@@ -751,45 +1160,68 @@ export function AiAssistantPage() {
             </div>
           </aside>
 
-          {/* Right Workspace: Live Assistant & Consultation History Tabs */}
-          <div className="lg:col-span-8 rounded-2xl bg-white border border-[#272757]/10 flex flex-col min-h-[600px] lg:sticky lg:top-24 max-h-[820px]">
-            {/* Tab Bar & Context Strip */}
+          {/* Right Workspace: Hybrid AI Chat, Offline Health Library & History Tabs */}
+          <div className="lg:col-span-8 rounded-2xl bg-white border border-[#272757]/10 flex flex-col min-h-[540px] lg:min-h-[660px] lg:sticky lg:top-20 lg:max-h-[840px]">
+            {/* Tab Bar & Actions */}
             <div className="px-4 sm:px-5 pt-3.5 pb-3 border-b border-[#272757]/10 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div
                   role="tablist"
                   aria-label="AI Assistant Views"
-                  className="inline-flex rounded-xl bg-[#F5F6FC] p-1 border border-[#272757]/10"
+                  className="inline-flex flex-wrap rounded-xl bg-[#F5F6FC] p-1 border border-[#272757]/10 gap-1"
                 >
                   <button
                     type="button"
                     role="tab"
                     aria-selected={activeTab === 'chat'}
                     onClick={() => setActiveTab('chat')}
-                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                       activeTab === 'chat'
                         ? 'bg-[#272757] text-white'
                         : 'text-[#505081] hover:text-[#0F0E47]'
                     }`}
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
-                    Live Assistant
+                    <span>Hybrid AI Chat</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === 'library'}
+                    onClick={() => setActiveTab('library')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      activeTab === 'library'
+                        ? 'bg-[#272757] text-white'
+                        : 'text-[#505081] hover:text-[#0F0E47]'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Offline Library</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                        activeTab === 'library'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-[#272757]/10 text-[#272757]'
+                      }`}
+                    >
+                      {offlineGuides.length}
+                    </span>
                   </button>
                   <button
                     type="button"
                     role="tab"
                     aria-selected={activeTab === 'history'}
                     onClick={() => setActiveTab('history')}
-                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                       activeTab === 'history'
                         ? 'bg-[#272757] text-white'
                         : 'text-[#505081] hover:text-[#0F0E47]'
                     }`}
                   >
                     <History className="w-3.5 h-3.5" />
-                    Consultation History
+                    <span>History</span>
                     <span
-                      className={`ml-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
                         activeTab === 'history'
                           ? 'bg-white/20 text-white'
                           : 'bg-[#272757]/10 text-[#272757]'
@@ -806,22 +1238,22 @@ export function AiAssistantPage() {
                       type="button"
                       disabled={!canSaveConversation || savingHistory}
                       onClick={() => void handleManualSaveCurrentChat()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F5F6FC] hover:bg-[#E8EAF7] disabled:opacity-45 disabled:cursor-not-allowed border border-[#272757]/15 text-[11px] font-semibold text-[#272757] transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-lg bg-[#F5F6FC] hover:bg-[#E8EAF7] disabled:opacity-45 disabled:cursor-not-allowed border border-[#272757]/15 text-[11px] font-semibold text-[#272757] transition-colors cursor-pointer"
                     >
                       {savingHistory ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <BookmarkPlus className="w-3.5 h-3.5" />
                       )}
-                      Save Summary
+                      <span>Save</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleStartNewChat}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F5F6FC] hover:bg-[#E8EAF7] border border-[#272757]/15 text-[11px] font-semibold text-[#272757] transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-lg bg-[#F5F6FC] hover:bg-[#E8EAF7] border border-[#272757]/15 text-[11px] font-semibold text-[#272757] transition-colors cursor-pointer"
                     >
                       <MessageSquarePlus className="w-3.5 h-3.5" />
-                      New Chat
+                      <span>New Chat</span>
                     </button>
                   </div>
                 )}
@@ -830,10 +1262,18 @@ export function AiAssistantPage() {
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#505081]">
                 <span className="font-semibold text-[#0F0E47] flex items-center gap-2">
                   <Bot className="w-4 h-4 text-[#272757]" />
-                  {activeTab === 'chat'
-                    ? mode
-                    : `Stored AI Health Summaries (${aiConsultations.length})`}
+                  <span>
+                    {activeTab === 'chat'
+                      ? `${mode} · ${
+                          ROUTING_MODE_OPTIONS.find((r) => r.id === privacyPrefs.routingPreference)
+                            ?.label
+                        }`
+                      : activeTab === 'library'
+                      ? `Curated WHO & Nigeria Offline Health Library (${offlineGuides.length} Chapters)`
+                      : `Stored AI Health Summaries (${aiConsultations.length})`}
+                  </span>
                 </span>
+
                 <div className="flex flex-wrap items-center gap-3">
                   {saveFeedback && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1D7A4C]">
@@ -843,52 +1283,154 @@ export function AiAssistantPage() {
                   )}
                   <span className="flex items-center gap-1 text-[11px] text-[#505081]">
                     <CheckCircle2 className="w-3.5 h-3.5 text-[#272757]" />
-                    {isGuestDemo ? 'Guest Demo Session' : 'Firestore Sync Active'}
-                  </span>
-                  <span className="flex items-center gap-1.5 font-medium text-[#0F0E47]">
-                    <FileText className="w-3.5 h-3.5" />
-                    {provider === 'gemini' ? 'Gemini' : `OpenRouter · ${openRouterModel}`}
+                    <span>
+                      {!isOnline
+                        ? 'Offline Local Mode'
+                        : user.signedIn
+                        ? 'Firestore Sync Active'
+                        : isGuestDemo
+                        ? 'Guest Demo Session'
+                        : 'Public Offline-Ready Mode'}
+                    </span>
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* TAB 1: LIVE CHAT */}
-            {activeTab === 'chat' ? (
+            {/* TAB 1: HYBRID AI CHAT */}
+            {activeTab === 'chat' && (
               <>
-                <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                  {messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      {m.role === 'assistant' && (
-                        <div className="w-8 h-8 rounded-lg bg-[#272757] text-white flex items-center justify-center shrink-0">
-                          <Bot className="w-4 h-4" />
-                        </div>
-                      )}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                  {messages.map((m) => {
+                    const pathStyle = getPathStyle(m.actualPath);
+                    const PathIcon = pathStyle.icon;
+                    return (
                       <div
-                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
-                          m.role === 'user'
-                            ? 'bg-[#272757] text-white'
-                            : 'bg-[#F5F6FC] text-[#0F0E47] border border-[#272757]/10'
+                        key={m.id}
+                        className={`flex gap-2.5 sm:gap-3 ${
+                          m.role === 'user' ? 'justify-end' : 'justify-start'
                         }`}
                       >
-                        {m.content}
-                        {m.role === 'assistant' && m.provider && (
-                          <p className="mt-2 pt-1.5 border-t border-[#272757]/10 text-[10px] text-[#505081]">
-                            Routed via {m.provider}
-                            {m.model ? ` (${m.model})` : ''}
-                          </p>
+                        {m.role === 'assistant' && (
+                          <div className="w-8 h-8 rounded-lg bg-[#272757] text-white flex items-center justify-center shrink-0">
+                            <Bot className="w-4 h-4" />
+                          </div>
+                        )}
+
+                        <div
+                          className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed space-y-2.5 ${
+                            m.role === 'user'
+                              ? 'bg-[#272757] text-white'
+                              : 'bg-[#F5F6FC] text-[#0F0E47] border border-[#272757]/10'
+                          }`}
+                        >
+                          {/* Instant Local Red-Flag Emergency Box */}
+                          {m.role === 'assistant' && m.redFlag?.isUrgent && (
+                            <div className="rounded-xl bg-[#FEF2F2] border border-[#E5484D]/40 p-3 text-xs text-[#991B1B] space-y-2">
+                              <div className="flex items-center gap-2 font-bold">
+                                <AlertTriangle className="w-4 h-4 text-[#DC2626] shrink-0" />
+                                <span>
+                                  Urgent Warning Sign Detected ({m.redFlag.matchedSignals.join(', ')})
+                                </span>
+                              </div>
+                              <p className="leading-relaxed">{m.redFlag.immediateGuidance}</p>
+                              <button
+                                type="button"
+                                onClick={() => navigate('/emergency')}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white text-xs font-semibold cursor-pointer"
+                              >
+                                <PhoneCall className="w-3.5 h-3.5" />
+                                <span>Open Emergency Centre (112)</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Main Message Body */}
+                          <div className="whitespace-pre-line">{m.content}</div>
+
+                          {/* Automatic Fallback Notice */}
+                          {m.role === 'assistant' && m.fallbackNotice && (
+                            <p className="text-[11px] text-[#92400E] bg-[#FEF3C7] border border-[#F59E0B]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                              {m.fallbackNotice}
+                            </p>
+                          )}
+
+                          {/* Cited Offline Guides */}
+                          {m.role === 'assistant' &&
+                            m.citedGuides &&
+                            m.citedGuides.length > 0 && (
+                              <div className="pt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                                <span className="font-semibold text-[#505081]">Sources:</span>
+                                {m.citedGuides.map((g) => (
+                                  <button
+                                    key={g.id}
+                                    type="button"
+                                    onClick={() => setActiveTab('library')}
+                                    className="inline-flex items-center gap-1 text-[#272757] hover:text-[#4B50D6] underline underline-offset-2 font-medium cursor-pointer"
+                                  >
+                                    <span>{g.title}</span>
+                                    <ArrowUpRight className="w-3 h-3" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                          {/* Honest Actual Processing Source Metadata */}
+                          {m.role === 'assistant' && m.indicatorLabel && (
+                            <div className="pt-2 border-t border-[#272757]/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                              <div className="space-y-0.5">
+                                <p
+                                  className={`font-semibold flex items-center gap-1.5 ${pathStyle.textClass}`}
+                                >
+                                  <PathIcon className="w-3.5 h-3.5 shrink-0" />
+                                  <span>{m.indicatorLabel}</span>
+                                  {typeof m.latencyMs === 'number' && (
+                                    <span className="text-[#6B6B99] font-normal tabular-nums">
+                                      · {m.latencyMs < 1000 ? `${m.latencyMs}ms` : `${(m.latencyMs / 1000).toFixed(1)}s`}
+                                    </span>
+                                  )}
+                                </p>
+                                {m.indicatorDetail && (
+                                  <p className="text-[10px] text-[#505081] leading-snug">
+                                    {m.indicatorDetail}
+                                    {m.profileContextSharedWithCloud
+                                      ? ' · Minimized vitals context included.'
+                                      : ''}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Optional 1-click Cloud Escalation on Local Library replies when online */}
+                              {m.actualPath === 'local-library' &&
+                                isOnline &&
+                                privacyPrefs.routingPreference !== 'local-only' &&
+                                m.promptForEscalation && (
+                                  <button
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() =>
+                                      void sendMessage(m.promptForEscalation, {
+                                        forceCloudEscalation: true,
+                                      })
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-[#272757]/15 hover:bg-[#ECEEF9] text-[11px] font-semibold text-[#272757] cursor-pointer disabled:opacity-50"
+                                  >
+                                    <Cloud className="w-3 h-3" />
+                                    <span>Ask Cloud AI deeper</span>
+                                  </button>
+                                )}
+                            </div>
+                          )}
+                        </div>
+
+                        {m.role === 'user' && (
+                          <div className="w-8 h-8 rounded-lg bg-[#E8702A] text-white flex items-center justify-center shrink-0">
+                            <User className="w-4 h-4" />
+                          </div>
                         )}
                       </div>
-                      {m.role === 'user' && (
-                        <div className="w-8 h-8 rounded-lg bg-[#E8702A] text-white flex items-center justify-center shrink-0">
-                          <User className="w-4 h-4" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {loading && (
                     <div role="status" aria-live="polite" className="flex gap-3 justify-start">
@@ -897,14 +1439,14 @@ export function AiAssistantPage() {
                       </div>
                       <div className="max-w-[85%] sm:min-w-[280px] rounded-2xl bg-[#F5F6FC] border border-[#272757]/12 px-4 py-3 space-y-2.5">
                         <div className="flex items-center justify-between gap-4 text-xs">
-                          <span className="font-semibold text-[#0F0E47] flex items-center gap-2">
-                            <span>
-                              {loadingSeconds < 3
-                                ? 'Reviewing your health question...'
-                                : loadingSeconds < 7
-                                  ? 'Checking clinical context & Nigerian care guidance...'
-                                  : 'Still working — retrying busy AI capacity if needed...'}
-                            </span>
+                          <span className="font-semibold text-[#0F0E47]">
+                            {!isOnline || privacyPrefs.routingPreference === 'local-only'
+                              ? 'Searching on-device AI & local WHO/Nigeria health guides...'
+                              : loadingSeconds < 3
+                              ? 'Evaluating local & hybrid AI route...'
+                              : loadingSeconds < 8
+                              ? 'Checking verified WHO/Nigeria guides & secure Cloud AI...'
+                              : 'Still working — will fall back to local guides if Cloud AI is slow...'}
                           </span>
                           <span className="font-mono text-[11px] text-[#505081] tabular-nums shrink-0">
                             {loadingSeconds}s
@@ -933,10 +1475,10 @@ export function AiAssistantPage() {
                           type="button"
                           disabled={loading}
                           onClick={() => void sendMessage(lastFailedPrompt, { isRetry: true })}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#E5484D]/30 hover:bg-[#FFF5F5] text-[#9C2327] font-semibold shrink-0 cursor-pointer self-start sm:self-center"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-white border border-[#E5484D]/30 hover:bg-[#FFF5F5] text-[#9C2327] font-semibold shrink-0 cursor-pointer self-start sm:self-center"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
-                          Retry
+                          <span>Retry</span>
                         </button>
                       )}
                     </div>
@@ -944,12 +1486,12 @@ export function AiAssistantPage() {
                   <div ref={chatEndRef} />
                 </div>
 
-                <div className="p-4 border-t border-[#272757]/10 space-y-2.5">
-                  {/* Voice Dictation Live Status & Language Controls */}
+                {/* Chat Composer & Voice Dictation */}
+                <div className="p-3.5 sm:p-4 border-t border-[#272757]/10 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#505081]">
                     <div className="flex items-center gap-2">
                       <label htmlFor="voice-lang" className="font-medium text-[#272757]">
-                        Voice Language:
+                        Voice:
                       </label>
                       <select
                         id="voice-lang"
@@ -965,12 +1507,14 @@ export function AiAssistantPage() {
                         ))}
                       </select>
                     </div>
-                    <span className="text-[11px] text-[#8686AC]">
-                      {speechSupported
+                    <span className="text-[11px] text-[#6B6B99]">
+                      {!isOnline
+                        ? 'Offline Mode — answers from Local AI & WHO/Nigeria guides'
+                        : speechSupported
                         ? isListening
-                          ? 'Listening hands-free — speak your symptoms'
-                          : 'Tap the mic to dictate symptoms hands-free'
-                        : 'Voice dictation unavailable in this browser'}
+                          ? 'Listening hands-free...'
+                          : 'Type or tap Speak to ask a health question'
+                        : 'Type your health question below'}
                     </span>
                   </div>
 
@@ -985,14 +1529,14 @@ export function AiAssistantPage() {
                         <p className="text-xs text-[#0F0E47] truncate">
                           {interimTranscript
                             ? `Hearing: "${interimTranscript}"`
-                            : 'Microphone active — describe what you are feeling...'}
+                            : 'Microphone active — describe your question clearly...'}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => stopVoiceDictation(false)}
-                          className="px-2.5 py-1 rounded-lg bg-white border border-[#272757]/20 text-[11px] font-semibold text-[#272757] hover:bg-[#F5F6FC] cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-white border border-[#272757]/20 text-[11px] font-semibold text-[#272757] hover:bg-[#F5F6FC] cursor-pointer"
                         >
                           Stop
                         </button>
@@ -1000,7 +1544,7 @@ export function AiAssistantPage() {
                           type="button"
                           onClick={() => stopVoiceDictation(true)}
                           disabled={loading || (!input.trim() && !interimTranscript.trim())}
-                          className="px-2.5 py-1 rounded-lg bg-[#272757] text-[11px] font-semibold text-white hover:bg-[#0F0E47] disabled:opacity-50 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-[#272757] text-[11px] font-semibold text-white hover:bg-[#0F0E47] disabled:opacity-50 cursor-pointer"
                         >
                           Stop &amp; Send
                         </button>
@@ -1026,7 +1570,7 @@ export function AiAssistantPage() {
                       e.preventDefault();
                       void sendMessage();
                     }}
-                    className="flex gap-2.5"
+                    className="flex gap-2"
                   >
                     <button
                       type="button"
@@ -1036,14 +1580,7 @@ export function AiAssistantPage() {
                       aria-label={
                         isListening ? 'Stop voice dictation' : 'Start voice-to-text dictation'
                       }
-                      title={
-                        !speechSupported
-                          ? 'SpeechRecognition is not supported in this browser'
-                          : isListening
-                            ? 'Stop voice dictation'
-                            : 'Speak your symptoms hands-free'
-                      }
-                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-3 min-h-[46px] min-w-[46px] rounded-xl border text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      className={`inline-flex items-center justify-center gap-1.5 px-3 py-3 min-h-[46px] min-w-[46px] rounded-xl border text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                         isListening
                           ? 'bg-[#E5484D] hover:bg-[#C9363B] text-white border-[#E5484D]'
                           : 'bg-[#F5F6FC] hover:bg-[#E8EAF7] text-[#272757] border-[#272757]/15'
@@ -1057,35 +1594,68 @@ export function AiAssistantPage() {
 
                     <input
                       type="text"
-                      aria-label="Ask the AI Health Assistant"
+                      aria-label="Ask the Hybrid AI Health Assistant"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      placeholder="Ask or tap Speak to describe your symptoms hands-free..."
-                      className="flex-1 px-4 py-3 min-h-[46px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-sm text-[#0F0E47]"
+                      placeholder="Ask about symptoms, lab terms, BP, malaria, PCOS, or first aid..."
+                      className="flex-1 min-w-0 px-3.5 py-3 min-h-[46px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-sm text-[#0F0E47]"
                     />
                     <button
                       type="submit"
                       disabled={loading || !input.trim()}
-                      className="inline-flex items-center gap-2 px-5 py-3 min-h-[46px] rounded-xl bg-[#272757] hover:bg-[#0F0E47] disabled:opacity-50 text-white text-sm font-semibold transition-colors cursor-pointer"
+                      className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-3 min-h-[46px] rounded-xl bg-[#272757] hover:bg-[#0F0E47] disabled:opacity-50 text-white text-sm font-semibold transition-colors cursor-pointer shrink-0"
                     >
                       {loading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span className="hidden sm:inline">Thinking...</span>
-                        </>
+                        <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
-                        <>
-                          <Send className="w-4 h-4" />
-                          <span className="hidden sm:inline">Send</span>
-                        </>
+                        <Send className="w-4 h-4" />
                       )}
+                      <span className="hidden sm:inline">{loading ? 'Thinking' : 'Send'}</span>
                     </button>
                   </form>
                 </div>
               </>
-            ) : (
-              /* TAB 2: CONSULTATION HISTORY (FIRESTORE) */
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            )}
+
+            {/* TAB 2: OFFLINE HEALTH REFERENCE LIBRARY */}
+            {activeTab === 'library' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+                <OfflineHealthLibraryPanel
+                  guides={offlineGuides}
+                  bookmarkedIds={bookmarkedGuideIds}
+                  onToggleBookmark={(id) => void handleToggleGuideBookmark(id)}
+                  onAskAboutGuide={handleAskAboutGuide}
+                  isOnline={isOnline}
+                />
+              </div>
+            )}
+
+            {/* TAB 3: CONSULTATION HISTORY (FIRESTORE) */}
+            {activeTab === 'history' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                {!isOnline && (
+                  <div className="rounded-xl bg-[#FEF3C7] border border-[#F59E0B]/35 p-3.5 text-xs text-[#92400E]">
+                    Cloud consultation history requires an internet connection. Your Offline Health
+                    Library and Local AI remain fully usable offline.
+                  </div>
+                )}
+
+                {!user.signedIn && !isGuestDemo && (
+                  <div className="rounded-xl bg-[#F5F6FC] border border-[#272757]/15 p-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[#272757]">
+                    <span>
+                      Sign in to your HealthConnect Oyo State account to securely sync consultation
+                      summaries in Cloud Firestore.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/login')}
+                      className="px-3.5 py-2 min-h-[40px] rounded-lg bg-[#272757] text-white font-semibold cursor-pointer"
+                    >
+                      Sign In
+                    </button>
+                  </div>
+                )}
+
                 {user.signedIn && !user.emailVerified && (
                   <div className="rounded-xl bg-[#E8702A]/10 border border-[#E8702A]/25 p-3.5 text-xs text-[#9C4410] flex flex-wrap items-center justify-between gap-2">
                     <span>
@@ -1125,7 +1695,7 @@ export function AiAssistantPage() {
                       value={historySearch}
                       onChange={(e) => setHistorySearch(e.target.value)}
                       placeholder="Search topics, questions, or health summaries..."
-                      className="w-full pl-9 pr-3.5 py-2.5 min-h-[42px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs text-[#0F0E47]"
+                      className="w-full pl-9 pr-3.5 py-2.5 min-h-[44px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs text-[#0F0E47]"
                     />
                   </div>
                   <div className="sm:col-span-5">
@@ -1133,7 +1703,7 @@ export function AiAssistantPage() {
                       aria-label="Filter consultation history by focus mode"
                       value={historyModeFilter}
                       onChange={(e) => setHistoryModeFilter(e.target.value)}
-                      className="w-full px-3 py-2.5 min-h-[42px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs font-medium text-[#0F0E47]"
+                      className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-xs font-medium text-[#0F0E47]"
                     >
                       <option value="ALL">All Focus Modes ({aiConsultations.length})</option>
                       {ASSISTANT_MODES.map((m) => (
@@ -1158,7 +1728,7 @@ export function AiAssistantPage() {
                       </p>
                       <p className="text-xs text-[#505081] max-w-md mx-auto leading-relaxed">
                         {aiConsultations.length === 0
-                          ? 'Every completed conversation with the AI Health Assistant is automatically summarized and stored in your private Firestore history.'
+                          ? 'Completed online conversations with your verified account are automatically summarized in your private Firestore history.'
                           : 'Try clearing your search term or switching the focus mode filter.'}
                       </p>
                     </div>
@@ -1172,10 +1742,10 @@ export function AiAssistantPage() {
                           setHistoryModeFilter('ALL');
                         }
                       }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#272757] hover:bg-[#0F0E47] text-white text-xs font-semibold cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 min-h-[42px] rounded-xl bg-[#272757] hover:bg-[#0F0E47] text-white text-xs font-semibold cursor-pointer"
                     >
                       {aiConsultations.length === 0
-                        ? 'Start Live Consultation'
+                        ? 'Start Hybrid Consultation'
                         : 'Clear Filters'}
                     </button>
                   </div>
@@ -1196,11 +1766,10 @@ export function AiAssistantPage() {
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="space-y-1 min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="px-2 py-0.5 rounded-md bg-[#272757]/10 text-[#272757] text-[10px] font-semibold">
-                                  {item.mode}
-                                </span>
-                                <span className="inline-flex items-center gap-1 text-[11px] text-[#505081]">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#505081]">
+                                <span className="font-semibold text-[#272757]">{item.mode}</span>
+                                <span aria-hidden="true">·</span>
+                                <span className="inline-flex items-center gap-1">
                                   <Clock className="w-3 h-3" />
                                   {formatConsultationDate(item.createdAt)}
                                 </span>
@@ -1210,7 +1779,7 @@ export function AiAssistantPage() {
                               </h3>
                             </div>
                             <span className="text-[10px] font-medium text-[#505081] bg-white border border-[#272757]/10 px-2 py-1 rounded-lg shrink-0">
-                              {item.provider} · {item.model} · {item.messageCount} msgs
+                              {item.model} · {item.messageCount} msgs
                             </span>
                           </div>
 
@@ -1259,23 +1828,23 @@ export function AiAssistantPage() {
                             <button
                               type="button"
                               onClick={() => handleLoadConsultationIntoChat(item)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#272757] hover:bg-[#0F0E47] text-white text-xs font-semibold transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-[#272757] hover:bg-[#0F0E47] text-white text-xs font-semibold transition-colors cursor-pointer"
                             >
                               <MessageSquare className="w-3.5 h-3.5" />
-                              Continue in Chat
+                              <span>Continue in Chat</span>
                             </button>
                             <button
                               type="button"
                               disabled={deletingId === item.id}
                               onClick={() => void handleDeleteConsultation(item.id)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-[#FFF5F5] border border-[#E5484D]/25 text-[#9C2327] text-xs font-semibold disabled:opacity-50 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-white hover:bg-[#FFF5F5] border border-[#E5484D]/25 text-[#9C2327] text-xs font-semibold disabled:opacity-50 transition-colors cursor-pointer"
                             >
                               {deletingId === item.id ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
                                 <Trash2 className="w-3.5 h-3.5" />
                               )}
-                              Delete
+                              <span>Delete</span>
                             </button>
                           </div>
                         </article>
@@ -1288,6 +1857,13 @@ export function AiAssistantPage() {
           </div>
         </div>
       </div>
+
+      {/* One-time NDPA-Informed Privacy & Cloud AI Consent Modal */}
+      <AiConsentModal
+        open={consentModalOpen}
+        onAccept={() => void handleAcceptConsent()}
+        onDecline={() => setConsentModalOpen(false)}
+      />
     </div>
   );
 }

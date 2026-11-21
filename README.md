@@ -4,29 +4,78 @@
 
 HealthConnect Oyo State is a full-stack digital health platform built specifically for individuals and families living in Oyo State. Instead of unpredictable per-visit fees, members subscribe to one monthly plan (**₦16,000/month Individual** or **₦50,000/month Family of 5 with Netflix-style profiles**), **consult verified Oyo State doctors online first at ₦0 per visit**, and **decide jointly with their doctor when to book an in-person physical examination** at an accredited Oyo State hospital.
 
-A formatted Microsoft Word (`.docx`) architectural blueprint is also bundled in [`public/HealthConnect_Oyo_State_Blueprint.docx`](public/HealthConnect_Oyo_State_Blueprint.docx).
-
 ---
 
 ## Table of Contents
 
-1. [Core Product Model & Care Journey](#1-core-product-model--care-journey)
-2. [Oyo State Geographic Coverage (All 27 Towns & Partner Facilities)](#2-oyo-state-geographic-coverage-all-27-towns--partner-facilities)
-3. [Subscription Plans & Netflix-Style Family Profiles](#3-subscription-plans--netflix-style-family-profiles)
-4. [Complete Website Pages & Routes (12 Routes)](#4-complete-website-pages--routes-12-routes)
-5. [Patient Dashboard Modules (All 15 Tabs)](#5-patient-dashboard-modules-all-15-tabs)
-6. [Interswitch Option 2 (Web Redirect) Payment Architecture](#6-interswitch-option-2-web-redirect-payment-architecture)
-7. [Technology Stack & Project Structure](#7-technology-stack--project-structure)
-8. [Backend REST API Reference](#8-backend-rest-api-reference)
-9. [Cloud Firestore Database Blueprint (21 Collections)](#9-cloud-firestore-database-blueprint-21-collections)
-10. [Security, Privacy, RBAC & Clinical Guardrails](#10-security-privacy-rbac--clinical-guardrails)
-11. [Environment Variables](#11-environment-variables)
-12. [Local Development, Testing & Production Deployment](#12-local-development-testing--production-deployment)
-13. [Demonstration Data & Clinical Safety Notice](#13-demonstration-data--clinical-safety-notice)
+1. [Visual Tour & Presentation Screenshots](#1-visual-tour--presentation-screenshots)
+2. [Core Product Model & Care Journey](#2-core-product-model--care-journey)
+3. [Progressive Web App (PWA) & Mobile Installation (Android, iOS & Desktop)](#3-progressive-web-app-pwa--mobile-installation-android-ios--desktop)
+4. [Hybrid AI Architecture (Firebase AI Logic + Offline Health Library + Cloud AI)](#4-hybrid-ai-architecture-firebase-ai-logic--offline-health-library--cloud-ai)
+5. [Oyo State Geographic Coverage (All 27 Towns & Partner Facilities)](#5-oyo-state-geographic-coverage-all-27-towns--partner-facilities)
+6. [Subscription Plans & Netflix-Style Family Profiles](#6-subscription-plans--netflix-style-family-profiles)
+7. [Complete Website Pages & Routes (12 Routes)](#7-complete-website-pages--routes-12-routes)
+8. [Patient Dashboard Modules (All 15 Tabs)](#8-patient-dashboard-modules-all-15-tabs)
+9. [Interswitch Option 2 (Web Redirect) Payment Architecture](#9-interswitch-option-2-web-redirect-payment-architecture)
+10. [Technology Stack & Project Structure](#10-technology-stack--project-structure)
+11. [Backend REST API Reference](#11-backend-rest-api-reference)
+12. [Cloud Firestore Database Blueprint (21 Collections)](#12-cloud-firestore-database-blueprint-21-collections)
+13. [Security, Privacy (NDPA-Informed), RBAC & Clinical Guardrails](#13-security-privacy-ndpa-informed-rbac--clinical-guardrails)
+14. [Environment Variables](#14-environment-variables)
+15. [Local Development, Testing & Production Deployment](#15-local-development-testing--production-deployment)
+16. [Demonstration Data & Clinical Safety Notice](#16-demonstration-data--clinical-safety-notice)
 
 ---
 
-## 1. Core Product Model & Care Journey
+## 1. Visual Tour & Presentation Screenshots
+
+Every screenshot below is captured directly from the live **HealthConnect Oyo State** application (all 14 high-resolution PNG files live in `public/screenshots/`).
+
+### 1.1 Landing Hero & Interactive 3D DNA Double Helix (`/`)
+![HealthConnect Oyo State Landing Hero & 3D DNA](public/screenshots/01_home_hero.png)
+
+### 1.2 Home Oyo State Care Directory Strip (`/`)
+![HealthConnect Oyo State Care Directory Strip](public/screenshots/02_home_care_directory.png)
+
+### 1.3 Oyo State Care Directory — All 27 Towns & Online Doctors First (`/find-healthcare`)
+![Oyo State Care Directory](public/screenshots/03_find_healthcare_oyo.png)
+
+### 1.4 Midnight Blue Eclipse Patient Dashboard Overview (`/dashboard`)
+![Patient Dashboard Overview](public/screenshots/04_dashboard_overview.png)
+
+### 1.5 Netflix-Style Family Profiles Hub — "Who's Accessing Care?" (Up to 5 Seats)
+![Netflix-Style Family Profiles Hub](public/screenshots/05_netflix_family_profiles.png)
+
+### 1.6 Online Consultations & Doctor-Scheduled Physical Exam Booking
+![Appointments & Physical Exam Scheduling](public/screenshots/06_appointments_physical_exam.png)
+
+### 1.7 Women's Health — Private Cycle Tracker & PCOS Care Pathway
+![Women's Health & PCOS Care](public/screenshots/07_womens_health_pcos.png)
+
+### 1.8 Rehabilitation Progress Studio — Guided Timer & Recovery Charts
+![Rehabilitation Progress Studio](public/screenshots/08_rehab_studio.png)
+
+### 1.9 Monthly Subscription Plans — Individual (₦16,000/mo) & Family of 5 (₦50,000/mo) (`/payments`)
+![Monthly Subscription Plans](public/screenshots/09_subscription_plans.png)
+
+### 1.10 Payment History & Printable Interswitch Receipts (`/payments`)
+![Payment History & Printable Receipt](public/screenshots/10_payment_history.png)
+
+### 1.11 Dedicated Interswitch Option 2 (Web Redirect) Checkout (`/checkout`)
+![Interswitch Option 2 Checkout](public/screenshots/11_interswitch_checkout.png)
+
+### 1.12 Blood Pressure & Blood Glucose Monitoring (`/monitoring`)
+![Vitals Monitoring](public/screenshots/12_vitals_monitoring.png)
+
+### 1.13 AI Health Information Assistant & Interactive Anatomy Explorer (`/ai-assistant`)
+![AI Health Information Assistant](public/screenshots/13_ai_health_assistant.png)
+
+### 1.14 24/7 Oyo State Emergency & Ambulance Triage Centre (`/emergency`)
+![Oyo State Emergency Centre](public/screenshots/14_oyo_emergency_centre.png)
+
+---
+
+## 2. Core Product Model & Care Journey
 
 HealthConnect Oyo State removes financial friction at the point of care by pairing a **subscription-only billing model** with an **online-first clinical workflow**:
 
@@ -52,7 +101,70 @@ HealthConnect Oyo State removes financial friction at the point of care by pairi
 
 ---
 
-## 2. Oyo State Geographic Coverage (All 27 Towns & Partner Facilities)
+## 3. Progressive Web App (PWA) & Mobile Installation (Android, iOS & Desktop)
+
+HealthConnect Oyo State is an installable, mobile-first Progressive Web App powered by `vite-plugin-pwa` (Workbox) with a privacy-strict caching policy:
+
+- **Web App Manifest (`/manifest.webmanifest`):**
+  - `name`: `HealthConnect Oyo State` | `short_name`: `HealthOyo`
+  - `display`: `standalone` | `theme_color`: `#0F0E47` | `background_color`: `#0B0A33`
+  - Dedicated crisp icons in `/public/`: `icon.svg`, `pwa-192x192.png`, `pwa-512x512.png`, `pwa-maskable-512x512.png` (maskable safe-zone), and `apple-touch-icon.png` (180×180 for iOS Safari).
+- **Privacy-Strict Service Worker:**
+  - Precaches the app shell, CSS, JS, and offline WHO & Nigeria Health Reference Library for instant offline loading (excludes large presentation screenshots from precache).
+  - Enforces `NetworkOnly` for `/api/*`, `/payment-response`, `firestore.googleapis.com`, `identitytoolkit.googleapis.com`, `securetoken.googleapis.com`, and `interswitchng.com` so authenticated patient data and payments are **never** cached in Service Worker Cache Storage.
+- **Mobile-First Navigation:** Compact fixed bottom thumb-zone navigation (`MobileBottomNav`) on screens `<768px`, offline status banner (`OfflineIndicator`), and an in-app `Install App` button (`PWAInstallButton`) that triggers native install on Chrome/Edge/Android or displays step-by-step instructions on iOS Safari.
+
+### How to Install on Your Device
+- **Android (Chrome / Edge / Samsung Internet):** Open the site, tap **Install App** in the top bar (or browser menu **⋮ → Add to Home screen / Install app**), then launch **HealthOyo** directly from your home screen.
+- **iPhone / iPad (Safari):** Open the site in Safari, tap the **Share** button (`↑`), scroll down and tap **Add to Home Screen**, then tap **Add**.
+- **Desktop (Chrome / Edge):** Click **Install App** in the navigation bar or the install icon in the browser address bar.
+
+---
+
+## 4. Hybrid AI Architecture (Firebase AI Logic + Offline Health Library + Cloud AI)
+
+Built to work reliably on low-bandwidth Nigerian mobile networks and eligible for **#BuildHybridAI 2026**, HealthConnect Oyo State runs **one unified Hybrid AI Router** (`src/services/hybridAiRouter.ts`) that seamlessly coordinates Local AI and Cloud AI:
+
+```text
+User Question (Chat, Voice Dictation, 3D Anatomy, or Offline Health Library)
+       │
+       ▼
+[1. Instant Local Clinical Red-Flag Detector (<1ms)]
+    ├── Detects emergency signs (chest pain, stroke BE-FAST, severe bleeding, seizures, pregnancy danger)
+    └── Immediately surfaces high-contrast Nigeria 112 Emergency Card (zero network delay)
+       │
+       ▼
+[2. Curated Offline WHO & Nigeria Health Library Grounding (18 Chapters · 6 Volumes)]
+    └── Weighted synonym search (bp, sugar, malaria RDT, ACT, PCOS, genotype SS, ORS, HbA1c, stroke)
+       │
+       ▼
+[3. Unified Hybrid AI Router (Connectivity + Device Capability + Mode + NDPA Consent)]
+    ├── Offline OR Local-Only Mode ──► Chrome On-Device Gemini Nano (Firebase AI Logic ONLY_ON_DEVICE)
+    │                                   └──► Fallback: Curated Offline WHO/Nigeria Health Engine
+    ├── Smart Hybrid (Online) ────────► On-Device Gemini Nano (PREFER_ON_DEVICE) for local-suitable tasks
+    │                                   ├──► Direct Local Library for terminology / app navigation
+    │                                   └──► Grounded Cloud AI (Express Backend / Firebase AI Logic Cloud)
+    └── Cloud Error / Timeout ────────► Automatic Graceful Fallback to Approved Offline Health Library
+```
+
+### Offline Curated Health Reference Library (All 6 Volumes Bundled Locally & Synced to Public IndexedDB)
+1. **WHO & Nigeria Primary Care Core** — Fever triage, diarrhoea & ORS/zinc, safe NAFDAC medication practices
+2. **Maternal, Women's Health & PCOS** — Antenatal care & pregnancy danger signs, PCOS & cycle tracking, recurrent yeast & sensitive symptoms
+3. **Chronic Care (BP, Diabetes & Sickle Cell)** — Hypertension & BP targets, Diabetes/HbA1c/glucose monitoring, Sickle Cell (HbSS/HbSC) crisis prevention
+4. **Infectious Diseases & Vaccines** — Malaria RDT & ACT protocol, Typhoid & safe water hygiene, Lassa Fever & Nigeria Routine Immunization (NPI)
+5. **Emergency First Aid & Red Flags** — Stroke BE-FAST, Chest pain & cardiac arrest response, Severe bleeding/burns/seizures & Nigeria `112`
+6. **Medical Terms, Labs & App Guide** — Plain-language lab glossary (HbA1c, lipid panel, PCV, genotype), Medical terms dictionary, HealthConnect Oyo navigation guide
+
+### Offline vs. Online Feature Matrix
+| Category | Feature Behavior |
+| --- | --- |
+| **Fully Offline** | 18-chapter WHO & Nigeria Health Library search & reader, Local AI educational answers, Instant Red-Flag Emergency Alerts, On-device Gemini Nano (supported Chrome), Guide bookmarks (public IndexedDB) |
+| **Partially Available** | Previously opened app views cached by the Service Worker; cached UI shell |
+| **Internet-Dependent** | Online Cloud AI deeper reasoning (Gemini/OpenRouter/Firebase AI Cloud), Cloud Firestore record sync, Doctor bookings, Interswitch payments, Live Maps, SOS dispatch |
+
+---
+
+## 5. Oyo State Geographic Coverage (All 27 Towns & Partner Facilities)
 
 ### All 27 Supported Cities, Towns & Care Corridors
 | Zone / Corridor | Covered Towns & Hubs |
@@ -80,7 +192,7 @@ HealthConnect Oyo State removes financial friction at the point of care by pairi
 
 ---
 
-## 3. Subscription Plans & Netflix-Style Family Profiles
+## 6. Subscription Plans & Netflix-Style Family Profiles
 
 | Plan | Server Order ID | Price | Seats | What's Included |
 | --- | --- | --- | --- | --- |
@@ -96,7 +208,7 @@ Inside **Dashboard → Family Profiles**:
 
 ---
 
-## 4. Complete Website Pages & Routes (12 Routes)
+## 7. Complete Website Pages & Routes (12 Routes)
 
 | Route | Auth Required | Component | Description |
 | --- | --- | --- | --- |
@@ -115,7 +227,7 @@ Inside **Dashboard → Family Profiles**:
 
 ---
 
-## 5. Patient Dashboard Modules (All 15 Tabs)
+## 8. Patient Dashboard Modules (All 15 Tabs)
 
 1. **Dashboard (Overview)** — 4-column radial KPI strip (Oyo Monthly Plan & profile seats, Latest BP, Rehab Mobility, Vaccines & Visits), patient identity summary, dark-mode BP area chart, and medication reminders widget.
 2. **Profile** — Full personal & clinical identity editor (name, age, gender, Oyo town, blood group, genotype, allergies, HMO/NHIA, medical history summary) plus isolated private contact PII (phone & residential address).
@@ -135,7 +247,7 @@ Inside **Dashboard → Family Profiles**:
 
 ---
 
-## 6. Interswitch Option 2 (Web Redirect) Payment Architecture
+## 9. Interswitch Option 2 (Web Redirect) Payment Architecture
 
 HealthConnect Oyo State implements Interswitch's official **Option 2 — Web Redirect** workflow, ensuring payment card details never touch the HealthConnect server or Firestore.
 
@@ -171,7 +283,7 @@ HealthConnect Oyo State implements Interswitch's official **Option 2 — Web Red
 
 ---
 
-## 7. Technology Stack & Project Structure
+## 10. Technology Stack & Project Structure
 
 ### Stack
 - **Frontend:** React 19, TypeScript, Vite 8, Tailwind CSS v4 (`@tailwindcss/vite`), Lucide React, Motion
@@ -188,7 +300,8 @@ HealthConnect Oyo State implements Interswitch's official **Option 2 — Web Red
 ├── firebase-blueprint.json              # Authoritative 21-collection Firestore schema blueprint
 ├── firestore.rules                      # Owner-only & 4-tier RBAC Firestore security rules
 ├── public/
-│   └── HealthConnect_Oyo_State_Blueprint.docx  # Downloadable Word blueprint document
+│   ├── screenshots/                     # 14 high-resolution presentation & README screenshots
+│   └── assets/aistudio/                 # Interactive Anatomy Explorer reference images
 ├── server/
 │   ├── createApp.ts                     # Express app factory, security headers, CORS, rate limits
 │   ├── config/env.ts                    # Environment parsing & Interswitch sandbox/prod config
@@ -212,7 +325,7 @@ HealthConnect Oyo State implements Interswitch's official **Option 2 — Web Red
 
 ---
 
-## 8. Backend REST API Reference
+## 11. Backend REST API Reference
 
 | Method & Endpoint | Auth / Rate Limit | Description |
 | --- | --- | --- |
@@ -229,7 +342,7 @@ HealthConnect Oyo State implements Interswitch's official **Option 2 — Web Red
 
 ---
 
-## 9. Cloud Firestore Database Blueprint (21 Collections)
+## 12. Cloud Firestore Database Blueprint (21 Collections)
 
 All collections are formally defined in `firebase-blueprint.json` and enforced by `firestore.rules`:
 
@@ -240,7 +353,10 @@ All collections are formally defined in `firebase-blueprint.json` and enforced b
 
 ---
 
-## 10. Security, Privacy, RBAC & Clinical Guardrails
+## 13. Security, Privacy (NDPA-Informed), RBAC & Clinical Guardrails
+
+- **NDPA-Informed AI Consent & Data Minimization:** Users receive a clear one-time Privacy & Consent Notice (`AiConsentModal`) before enabling optional Cloud AI profile context, plus a persistent per-chat toggle and 1-click consent revocation. When enabled, only a minimized clinical summary (age, Oyo town, blood group, genotype, latest BP/glucose/lab summary) is sent—never full name, phone number, address, or payment credentials.
+- **Zero Sensitive Offline Caching:** Service Worker rules strictly enforce `NetworkOnly` on `/api/*`, Firestore, Firebase Auth, and Interswitch endpoints. IndexedDB (`healthconnect-oyo-public-v1`) stores ONLY public educational guides, guide bookmarks, and non-sensitive UI preferences—never patient records or PII.
 
 - **4-Tier RBAC:** `patient`, `doctor`, `hospital`, and `administrator` roles enforced across both Express middleware and Cloud Firestore rules.
 - **Owner-Only Privacy & Explicit Consent:** Private PII (`/users/{uid}/private`), women's health & PCOS logs (`/cycleLogs`), and health records are accessible only to the owning user unless explicitly shared per record via `sharedWithDoctorUid`.
@@ -250,7 +366,7 @@ All collections are formally defined in `firebase-blueprint.json` and enforced b
 
 ---
 
-## 11. Environment Variables
+## 14. Environment Variables
 
 Copy `.env.example` to `.env` and configure secrets server-side (never commit `.env` to Git):
 
@@ -281,7 +397,7 @@ ADMIN_EMAILS=
 
 ---
 
-## 12. Local Development, Testing & Production Deployment
+## 15. Local Development, Testing & Production Deployment
 
 ```bash
 # 1. Install dependencies
@@ -306,7 +422,7 @@ npm start
 
 ---
 
-## 13. Demonstration Data & Clinical Safety Notice
+## 16. Demonstration Data & Clinical Safety Notice
 
 All sample clinicians, hospital listings, demonstration patient profiles, vitals readings, emergency dispatch stages, and sandbox Interswitch payment records included in this repository are demonstration data. Before launching to live patients in Oyo State:
 1. Switch `INTERSWITCH_ENVIRONMENT=production` with verified Quickteller Business / Interswitch credentials.

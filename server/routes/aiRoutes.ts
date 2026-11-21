@@ -1,8 +1,8 @@
 import { Router, type RequestHandler } from 'express';
-import { type AuthenticatedRequest } from '../middleware/auth';
-import { AiGatewayError, runAiGateway } from '../services/aiGateway';
-import { recordServerAudit } from '../services/auditService';
-import { aiHealthAssistantSchema } from '../validators/schemas';
+import { type AuthenticatedRequest } from '../middleware/auth.ts';
+import { AiGatewayError, runAiGateway } from '../services/aiGateway.ts';
+import { recordServerAudit } from '../services/auditService.ts';
+import { aiHealthAssistantSchema } from '../validators/schemas.ts';
 
 export function createAiRouter(optionalAuthMiddleware: RequestHandler) {
   const router = Router();

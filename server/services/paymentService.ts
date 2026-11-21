@@ -3,7 +3,7 @@ import {
   getMissingInterswitchCredentials,
   getServerConfig,
   type InterswitchEnvironment,
-} from '../config/env';
+} from '../config/env.ts';
 import {
   AUTHORITATIVE_ORDER_CATALOG,
   getPaymentByReference,
@@ -14,8 +14,8 @@ import {
   saveWebhookEvent,
   updatePaymentRecord,
   type ServerPaymentRecord,
-} from './paymentStore';
-import { recordServerAudit } from './auditService';
+} from './paymentStore.ts';
+import { recordServerAudit } from './auditService.ts';
 
 export type PaymentCategory =
   | 'Subscription'

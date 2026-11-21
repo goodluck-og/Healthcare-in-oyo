@@ -3,7 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createApiApp } from './server/createApp';
+import { createApiApp } from './server/createApp.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +19,21 @@ async function startServer() {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     next();
   });
+
+  // Serve generated presentation exports (kept outside public/ to keep GitHub uploads lightweight)
+  const exportFiles: Record<string, string> = {
+    '/HealthConnect_Oyo_State_Blueprint.docx': '/tmp/healthconnect_exports/HealthConnect_Oyo_State_Blueprint.docx',
+    '/HealthConnect_Oyo_State_Screenshots.zip': '/tmp/healthconnect_exports/HealthConnect_Oyo_State_Screenshots.zip',
+  };
+  for (const [routePath, filePath] of Object.entries(exportFiles)) {
+    app.get(routePath, (_req, res, next) => {
+      if (fs.existsSync(filePath)) {
+        res.download(filePath, path.basename(filePath));
+        return;
+      }
+      next();
+    });
+  }
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');

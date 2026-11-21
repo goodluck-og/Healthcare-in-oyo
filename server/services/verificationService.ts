@@ -1,4 +1,4 @@
-import { getServerConfig } from '../config/env';
+import { getServerConfig } from '../config/env.ts';
 
 export function sendSmsVerificationOtp(phone: string): {
   statusCode: number;

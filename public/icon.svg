@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B0A33" />
+      <stop offset="55%" stop-color="#171656" />
+      <stop offset="100%" stop-color="#2B2C7B" />
+    </linearGradient>
+    <linearGradient id="accent" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6C71EC" />
+      <stop offset="100%" stop-color="#4FD1C5" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect x="28" y="28" width="456" height="456" rx="92" stroke="rgba(255,255,255,0.14)" stroke-width="4" />
+  <!-- Shield Emblem -->
+  <path
+    d="M256 96L378 144V244C378 323 326 384 256 416C186 384 134 323 134 244V144L256 96Z"
+    fill="rgba(108,113,236,0.18)"
+    stroke="url(#accent)"
+    stroke-width="14"
+    stroke-linejoin="round"
+  />
+  <!-- Medical Cross -->
+  <rect x="230" y="168" width="52" height="156" rx="14" fill="#FFFFFF" />
+  <rect x="178" y="220" width="156" height="52" rx="14" fill="#FFFFFF" />
+  <!-- Warm Pulse Accent Line -->
+  <path
+    d="M168 338H216L234 306L258 362L280 322L296 338H344"
+    stroke="#FFB585"
+    stroke-width="12"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

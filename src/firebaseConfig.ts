@@ -9,11 +9,11 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // CRITICAL: Must pass firestoreDatabaseId as the database target for the provisioned Enterprise Firestore database.
-// Force long-polling in browser environments so buffering proxies, mobile ISPs, firewalls, or embedded iframes
-// do not stall WebChannel streaming requests and trigger 10-second offline timeouts.
+// Auto-detect long-polling so fast WebChannel streaming is used by default while automatically falling back
+// behind strict proxies or embedded iframes without forcing slow XHR polling that can time out.
 function createFirestoreInstance(): Firestore {
   if (typeof window === 'undefined') {
     return getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -22,8 +22,7 @@ function createFirestoreInstance(): Firestore {
     return initializeFirestore(
       app,
       {
-        experimentalForceLongPolling: true,
-        experimentalLongPollingOptions: { timeoutSeconds: 15 },
+        experimentalAutoDetectLongPolling: true,
       },
       firebaseConfig.firestoreDatabaseId
     );
@@ -84,6 +83,14 @@ if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     const msg = event.message || '';
     const filename = event.filename || '';
+    if (
+      msg.includes('ResizeObserver loop completed with undelivered notifications') ||
+      msg.includes('ResizeObserver loop limit exceeded')
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (
       msg.includes('INTERNAL ASSERTION FAILED: Pending promise was never set') &&
       (filename.includes('firebase_auth') || filename.includes('@firebase/auth') || msg.includes('PopupOperation'))
