@@ -13,6 +13,7 @@ import {
   GlucoseRechartsTrend,
   VitalsTrendChart,
 } from '../components/monitoring/VitalsTrendChart';
+import { SmartwatchHub } from '../components/monitoring/SmartwatchHub';
 
 export function MonitoringPage() {
   const {
@@ -133,7 +134,7 @@ export function MonitoringPage() {
 
   const downloadCsvReport = () => {
     const lines = [
-      `HealthConnect Oyo State — Vitals Summary Report (Demonstration Data)`,
+      `HealthConnect — Vitals Summary Report`,
       `Patient: ${activeProfile.fullName} (${activeProfile.demoMemberId})`,
       ``,
       `BLOOD PRESSURE LOGS`,
@@ -164,10 +165,10 @@ export function MonitoringPage() {
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold text-[#505081]">
-              Manual Vitals Logbook · Demonstration Data
+              HealthConnect · Smartwatch &amp; Manual Vitals Hub
             </p>
             <h1 className="text-3xl font-bold text-[#0F0E47] mt-1">
-              Blood Pressure & Glucose Monitoring
+              Smartwatch Vitals, Blood Pressure &amp; Glucose Monitoring
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -213,6 +214,9 @@ export function MonitoringPage() {
             {vitalsSaved}
           </div>
         )}
+
+        {/* Smartwatch Live Vitals & GPS Auto-Escalation Hub */}
+        <SmartwatchHub />
 
         {/* Unified Recharts Vitals Trend Line Chart */}
         <VitalsTrendChart

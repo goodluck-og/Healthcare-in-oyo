@@ -35,38 +35,38 @@ const DEDICATED_CARE_ROUTES: Array<{
   accent: string;
 }> = [
   {
-    route: '/find-healthcare',
-    title: 'Online Doctors First (Oyo State)',
+    route: '/ai-assistant',
+    title: 'Hybrid AI & Accident Photo First Aid',
     subtitle:
-      'Consult verified Oyo State doctors online under your monthly plan, then decide together when to schedule a physical exam at UCH, Adeoyo, Ring Road, or Bowen.',
-    cta: 'Talk to a Doctor',
+      'Interactive follow-up questions in both Local & Cloud AI grounded in DOID/WHO/MedlinePlus, openFDA drug lookup, and emergency injury photo safety guidance.',
+    cta: 'Open Hybrid AI',
     icon: Stethoscope,
     accent: 'text-[#8A8EF5]',
   },
   {
-    route: '/payments',
-    title: 'Individual (₦16k) & Family of 5 (₦50k)',
+    route: '/monitoring',
+    title: 'Smartwatch Vitals & GPS Auto-SOS',
     subtitle:
-      'One monthly subscription via Interswitch Web Redirect — Netflix-style profiles for up to 5 family members and transparent Payment History.',
-    cta: 'View Plans & History',
-    icon: CreditCard,
+      'Pair Bluetooth heart-rate watches or run simulator tests with configurable critical thresholds, 15-second safety countdown, and GPS hospital routing.',
+    cta: 'Open Watch & Vitals',
+    icon: Activity,
     accent: 'text-[#FFB585]',
   },
   {
     route: '/dashboard',
-    title: 'Netflix-Style Family Dashboard',
+    title: 'Age-Safe Personalised Dashboard',
     subtitle:
-      'Switch between up to 5 private household profiles with blood group, genotype & sickle cell care, women’s health, and vaccines (0–5, 10–15, 15+).',
+      'Adapts to children (0–12 Guardian Lock), teens, young adults, adults, and seniors — with multi-member profiles, vaccines, and clinical records.',
     cta: 'Open Dashboard',
-    icon: Activity,
+    icon: CreditCard,
     accent: 'text-[#4FD1C5]',
   },
   {
     route: '/emergency',
-    title: '24/7 Oyo Emergency Triage',
+    title: '24/7 Emergency & Offline Medical QR',
     subtitle:
-      'Rapid ambulance handoff and trauma coordination across Ibadan, Ogbomoso, Oyo Town, Iseyin, Saki, and all 27 Oyo State towns.',
-    cta: 'Emergency Desk',
+      '1-tap direct emergency calling (112 / 911 / 999), nearest 24/7 hospital GPS routing, and offline Phone & Smartwatch Medical QR for first responders.',
+    cta: 'Emergency & QR ID',
     icon: PhoneCall,
     accent: 'text-[#FF8A8E]',
   },
@@ -81,15 +81,15 @@ function DedicatedCareDirectoryStrip() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div className="space-y-1.5">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#FFB585]">
-              HealthConnect Oyo State · Connected Healthcare for Oyo State
+              HealthConnect · Universal Hybrid AI Healthcare
             </p>
             <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-              Simple subscription healthcare across every city in Oyo State
+              Intelligent healthcare tailored to every age, device, and emergency
             </h2>
           </div>
           <p className="text-xs sm:text-sm text-[#C7C8E6] max-w-md">
-            Start online with a verified doctor, schedule physical exams only when needed, and pay
-            one predictable monthly subscription through Interswitch Checkout.
+            Works online and offline as an installable PWA — combining verified medical knowledge,
+            smartwatch GPS safety, offline Medical QR IDs, and clinical care pathways.
           </p>
         </div>
 
@@ -135,14 +135,15 @@ function MainShell() {
     route === '/login' ||
     route === '/register' ||
     route === '/payment-response' ||
-    route === '/ai-assistant';
+    route === '/ai-assistant' ||
+    route === '/emergency';
 
   const renderPage = () => {
     if (!user.signedIn && !isPublicRoute) {
       if (authLoading) {
         return (
           <div className="min-h-[calc(100vh-4rem)] bg-[#0B0A33] flex items-center justify-center p-10 text-sm text-[#C7C8E6]">
-            Checking your HealthConnect Oyo State session...
+            Checking your HealthConnect session...
           </div>
         );
       }

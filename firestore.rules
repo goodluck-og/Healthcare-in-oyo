@@ -95,20 +95,67 @@ service cloud.firestore {
 
     function isValidFamilyProfile(data) {
       return data.keys().hasAll(['ownerUid', 'fullName', 'relationship', 'age', 'city', 'bloodGroup', 'genotype', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['ownerUid', 'fullName', 'relationship', 'age', 'gender', 'city', 'bloodGroup', 'genotype', 'allergies', 'hmoProvider', 'demoMemberId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'ownerUid', 'fullName', 'relationship', 'dateOfBirth', 'age', 'gender', 'genderConfirmed',
+          'city', 'countryCode', 'emergencyNumber', 'bloodGroup', 'genotype', 'allergies',
+          'chronicConditions', 'currentMedications', 'isGuardianManaged', 'onboardingCompleted',
+          'enabledModules', 'qrSharedFields', 'healthNeedPreferences', 'hmoProvider', 'demoMemberId',
+          'createdAt', 'updatedAt'
+        ]) &&
         isValidId(data.ownerUid) &&
         data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
         data.relationship in ['Self (Primary)', 'Child Dependent', 'Parent'] &&
+        (!('dateOfBirth' in data) || (data.dateOfBirth is string && data.dateOfBirth.size() <= 16)) &&
         data.age is number && data.age >= 0 && data.age <= 120 &&
         (!('gender' in data) || (data.gender is string && data.gender.size() <= 32)) &&
+        (!('genderConfirmed' in data) || data.genderConfirmed in ['female', 'male', 'not_specified']) &&
         data.city is string && data.city.size() >= 1 && data.city.size() <= 60 &&
+        (!('countryCode' in data) || (data.countryCode is string && data.countryCode.size() <= 8)) &&
+        (!('emergencyNumber' in data) || (data.emergencyNumber is string && data.emergencyNumber.size() <= 16)) &&
         data.bloodGroup is string && data.bloodGroup.size() >= 1 && data.bloodGroup.size() <= 8 &&
         data.genotype is string && data.genotype.size() >= 1 && data.genotype.size() <= 8 &&
         (!('allergies' in data) || (data.allergies is list && data.allergies.size() <= 10 && (data.allergies.size() == 0 || data.allergies[0] is string))) &&
+        (!('chronicConditions' in data) || (data.chronicConditions is list && data.chronicConditions.size() <= 12 && (data.chronicConditions.size() == 0 || data.chronicConditions[0] is string))) &&
+        (!('currentMedications' in data) || (data.currentMedications is list && data.currentMedications.size() <= 15 && (data.currentMedications.size() == 0 || data.currentMedications[0] is string))) &&
+        (!('isGuardianManaged' in data) || data.isGuardianManaged is bool) &&
+        (!('onboardingCompleted' in data) || data.onboardingCompleted is bool) &&
+        (!('enabledModules' in data) || (data.enabledModules is list && data.enabledModules.size() <= 20 && (data.enabledModules.size() == 0 || data.enabledModules[0] is string))) &&
+        (!('qrSharedFields' in data) || (data.qrSharedFields is list && data.qrSharedFields.size() <= 10 && (data.qrSharedFields.size() == 0 || data.qrSharedFields[0] is string))) &&
+        (!('healthNeedPreferences' in data) || (
+          data.healthNeedPreferences is map &&
+          data.healthNeedPreferences.keys().hasOnly([
+            'includeFemaleHealth', 'includeMaleHealth', 'includeChronicCare',
+            'includeFitnessAndNutrition', 'includeWearableMonitoring', 'includeCaregiverTools'
+          ])
+        )) &&
         (!('hmoProvider' in data) || (data.hmoProvider is string && data.hmoProvider.size() <= 120)) &&
         (!('demoMemberId' in data) || (data.demoMemberId is string && data.demoMemberId.size() <= 40)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidWearableReading(data) {
+      return data.keys().hasAll(['ownerUid', 'profileId', 'source', 'deviceName', 'heartRateBpm', 'spo2Percent', 'recordedAt', 'createdAt']) &&
+        data.keys().hasOnly([
+          'ownerUid', 'profileId', 'source', 'deviceName', 'heartRateBpm', 'spo2Percent',
+          'systolic', 'diastolic', 'temperatureC', 'steps', 'sleepHours', 'recordedAt',
+          'criticalAlertTriggered', 'alertReason', 'createdAt'
+        ]) &&
+        isValidId(data.ownerUid) &&
+        data.profileId is string && data.profileId.size() >= 1 && data.profileId.size() <= 128 &&
+        data.source in ['web_bluetooth', 'manual', 'simulator'] &&
+        data.deviceName is string && data.deviceName.size() >= 2 && data.deviceName.size() <= 100 &&
+        data.heartRateBpm is number && data.heartRateBpm >= 20 && data.heartRateBpm <= 260 &&
+        data.spo2Percent is number && data.spo2Percent >= 50 && data.spo2Percent <= 100 &&
+        (!('systolic' in data) || (data.systolic is number && data.systolic >= 50 && data.systolic <= 280)) &&
+        (!('diastolic' in data) || (data.diastolic is number && data.diastolic >= 30 && data.diastolic <= 180)) &&
+        (!('temperatureC' in data) || (data.temperatureC is number && data.temperatureC >= 30 && data.temperatureC <= 45)) &&
+        (!('steps' in data) || (data.steps is number && data.steps >= 0 && data.steps <= 200000)) &&
+        (!('sleepHours' in data) || (data.sleepHours is number && data.sleepHours >= 0 && data.sleepHours <= 24)) &&
+        data.recordedAt is string && data.recordedAt.size() >= 4 && data.recordedAt.size() <= 40 &&
+        (!('criticalAlertTriggered' in data) || data.criticalAlertTriggered is bool) &&
+        (!('alertReason' in data) || (data.alertReason is string && data.alertReason.size() <= 240)) &&
+        data.createdAt is timestamp;
     }
 
     function isValidBpReading(data) {
@@ -743,6 +790,16 @@ service cloud.firestore {
       allow get: if isValidId(eventId) && isAdmin();
       allow list: if isAdmin();
       allow create, update, delete: if false;
+    }
+
+    match /wearableReadings/{readingId} {
+      allow get: if isValidId(readingId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(readingId) && isVerifiedUser() && isValidWearableReading(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(readingId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
     }
   }
 }

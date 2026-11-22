@@ -21,10 +21,10 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'HealthConnect Oyo State',
-          short_name: 'HealthOyo',
+          name: 'HealthConnect',
+          short_name: 'HealthConnect',
           description:
-            'Connected healthcare for Oyo State — installable Hybrid AI PWA with offline WHO/Nigeria health guides, online doctors, and Netflix-style family profiles.',
+            'HealthConnect — universal Hybrid AI healthcare PWA with verified offline DOID/WHO medical knowledge, age-personalised dashboards, smartwatch GPS alerts, and offline Emergency Medical QR.',
           theme_color: '#0F0E47',
           background_color: '#0B0A33',
           display: 'standalone',

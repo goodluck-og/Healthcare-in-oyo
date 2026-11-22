@@ -18,12 +18,14 @@ import {
   Pencil,
   PhoneCall,
   Pill,
+  QrCode,
   Search,
   Settings,
   Syringe,
   User as UserIcon,
   Users,
   Wallet,
+  Watch,
   X,
 } from 'lucide-react';
 import {
@@ -50,11 +52,18 @@ import { CycleTrackerCard } from '../components/wellness/CycleTrackerCard';
 import { SpecialCareHub } from '../components/wellness/SpecialCareHub';
 import { HealthTimeline } from '../components/timeline/HealthTimeline';
 import { NetflixFamilyHub } from '../components/family/NetflixFamilyHub';
+import { PersonalisedDashboardHub } from '../components/dashboard/PersonalisedDashboardHub';
+import { SmartwatchHub } from '../components/monitoring/SmartwatchHub';
+import { EmergencyMedicalQrCard } from '../components/emergency/EmergencyMedicalQrCard';
+import { HealthOnboardingModal } from '../components/onboarding/HealthOnboardingModal';
+import { buildPersonalisedDashboardPlan } from '../services/personalisationEngine';
 import type { FamilyProfile } from '../types/healthcare';
 
 type DashboardTab =
   | 'overview'
   | 'profile'
+  | 'wearable'
+  | 'qr'
   | 'records'
   | 'labs'
   | 'appointments'
@@ -117,8 +126,10 @@ const NAV_ITEMS: Array<{
   keywords: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'overview', label: 'Dashboard', keywords: 'summary home basic kpi overview', icon: HeartPulse },
-  { id: 'profile', label: 'Profile', keywords: 'blood group genotype allergies sickle cell', icon: UserIcon },
+  { id: 'overview', label: 'Dashboard', keywords: 'summary home basic kpi overview personalised', icon: HeartPulse },
+  { id: 'profile', label: 'Profile', keywords: 'blood group genotype allergies sickle cell dob', icon: UserIcon },
+  { id: 'wearable', label: 'Smartwatch & GPS', keywords: 'watch wearable heart rate spo2 bluetooth sos gps', icon: Watch },
+  { id: 'qr', label: 'Emergency QR ID', keywords: 'qr code first responder lock screen watch medical id', icon: QrCode },
   { id: 'records', label: 'Medical Records', keywords: 'documents prescriptions history', icon: FileText },
   { id: 'labs', label: 'Lab Results', keywords: 'blood test hba1c genotype ai test review', icon: FlaskConical },
   { id: 'appointments', label: 'Appointments', keywords: 'doctor clinic booking visits uch ibadan', icon: Calendar },
@@ -145,6 +156,10 @@ export function DashboardPage() {
     familyProfiles,
     activeProfileId,
     setActiveProfileId,
+    updateFamilyProfile,
+    needsOnboardingPrompt,
+    dismissOnboardingPrompt,
+    completeHealthOnboarding,
     seedDemoWorkspaceForUser,
     appointments,
     activeSubscription,
@@ -164,6 +179,7 @@ export function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [profileEditRequested, setProfileEditRequested] = useState(false);
+  const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
   const [newContactRelation, setNewContactRelation] = useState('Family Member');
@@ -173,6 +189,18 @@ export function DashboardPage() {
 
   const activeProfile =
     familyProfiles.find((p) => p.id === activeProfileId) || familyProfiles[0] || null;
+
+  const personalisationPlan = useMemo(
+    () => buildPersonalisedDashboardPlan(activeProfile),
+    [activeProfile]
+  );
+
+  // Enforce child safety: never stay on Women's Health tab if active profile is a child (0-12)
+  React.useEffect(() => {
+    if (personalisationPlan.hideAdultReproductiveTabs && tab === 'womens') {
+      setTab('overview');
+    }
+  }, [personalisationPlan.hideAdultReproductiveTabs, tab]);
 
   const profileAppointments = useMemo(
     () =>
@@ -219,13 +247,16 @@ export function DashboardPage() {
   };
 
   const filteredNavItems = useMemo(() => {
+    const safeItems = personalisationPlan.hideAdultReproductiveTabs
+      ? NAV_ITEMS.filter((item) => item.id !== 'womens')
+      : NAV_ITEMS;
     const q = sidebarSearch.trim().toLowerCase();
-    if (!q) return NAV_ITEMS;
-    return NAV_ITEMS.filter(
+    if (!q) return safeItems;
+    return safeItems.filter(
       (item) =>
         item.label.toLowerCase().includes(q) || item.keywords.toLowerCase().includes(q)
     );
-  }, [sidebarSearch]);
+  }, [sidebarSearch, personalisationPlan.hideAdultReproductiveTabs]);
 
   const vitalsChartData = useMemo(() => {
     const bpSorted = [...profileBp]
@@ -662,6 +693,23 @@ export function DashboardPage() {
           {/* Main Content Area */}
           <div className="flex-1 min-w-0 w-full space-y-6">
             {/* Native Midnight Blue Eclipse Modules */}
+            {tab === 'wearable' && <SmartwatchHub darkTheme />}
+            {tab === 'qr' && (
+              <EmergencyMedicalQrCard
+                profile={activeProfile || {}}
+                primaryContact={
+                  emergencyContacts.find((c) => c.isPrimary) || emergencyContacts[0] || null
+                }
+                darkTheme
+                onUpdateSharedFields={(fields) => {
+                  if (activeProfile) {
+                    void updateFamilyProfile(activeProfile.id, { qrSharedFields: fields }).catch(
+                      () => undefined
+                    );
+                  }
+                }}
+              />
+            )}
             {tab === 'timeline' && <HealthTimeline />}
             {tab === 'rehab' && <RehabilitationStudio />}
             {tab === 'care' && <SpecialCareHub />}
@@ -733,8 +781,8 @@ export function DashboardPage() {
               </section>
             )}
 
-            {/* Dedicated WOMEN'S HEALTH Tab (Cycle Tracker + PCOS & Yeast / Sensitive Symptoms) */}
-            {tab === 'womens' && (
+            {/* Dedicated WOMEN'S HEALTH Tab (Hidden automatically for Child Profiles ages 0-12) */}
+            {tab === 'womens' && !personalisationPlan.hideAdultReproductiveTabs && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 <div className="lg:col-span-7">
                   <CycleTrackerCard />
@@ -826,6 +874,22 @@ export function DashboardPage() {
             {/* OVERVIEW TAB — Midnight Blue Eclipse Analytics & Care Command Centre */}
             {tab === 'overview' && (
               <div className="space-y-6">
+                {/* Adaptive HealthConnect Personalisation Engine Hub */}
+                <PersonalisedDashboardHub
+                  profile={activeProfile}
+                  onNavigateRoute={navigate}
+                  onOpenDashboardTab={(nextTab) => selectDashboardTab(nextTab as DashboardTab)}
+                  onOpenOnboarding={() => setManualOnboardingOpen(true)}
+                  onToggleOptionalModule={async (moduleId, currentlyEnabled) => {
+                    if (!activeProfile) return;
+                    const existing = activeProfile.enabledModules || [];
+                    const next = currentlyEnabled
+                      ? existing.filter((id) => id !== moduleId)
+                      : [...existing, moduleId];
+                    await updateFamilyProfile(activeProfile.id, { enabledModules: next });
+                  }}
+                />
+
                 {/* 4-Column Radial KPI Strip */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                   <button
@@ -1054,10 +1118,12 @@ export function DashboardPage() {
                     <HealthTimeline limit={5} onViewAll={() => setTab('timeline')} />
                   </div>
 
-                  {/* Right Rail (4 cols) — Women's Health, Notifications & Rehab Shortcut */}
+                  {/* Right Rail (4 cols) — Women's Health (age-gated), Notifications & Rehab Shortcut */}
                   <div className="xl:col-span-4 space-y-6">
-                    {/* Women's Menstruation & Cycle Tracker (Compact Rail) */}
-                    <CycleTrackerCard compact onOpenFullCare={() => setTab('womens')} />
+                    {/* Women's Menstruation & Cycle Tracker (Strict child 0-12 safety gate) */}
+                    {!personalisationPlan.hideAdultReproductiveTabs && (
+                      <CycleTrackerCard compact onOpenFullCare={() => setTab('womens')} />
+                    )}
 
                     {/* Important Notifications Panel (Notebook Right Area) */}
                     <section className="rounded-2xl bg-[#13124A] border border-white/10 p-5 space-y-3">
@@ -1306,6 +1372,22 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Essential Health Profile Onboarding Modal (Auto-shown after Google Sign-In or on edit) */}
+      <HealthOnboardingModal
+        open={needsOnboardingPrompt || manualOnboardingOpen}
+        initialProfile={activeProfile}
+        defaultName={user.name}
+        defaultCity={user.city}
+        onSave={async (payload) => {
+          await completeHealthOnboarding(payload);
+          setManualOnboardingOpen(false);
+        }}
+        onDismiss={() => {
+          dismissOnboardingPrompt();
+          setManualOnboardingOpen(false);
+        }}
+      />
     </div>
   );
 }

@@ -12,11 +12,11 @@ interface NavLinkItem {
 
 const DESKTOP_LINKS: NavLinkItem[] = [
   { label: 'Home', route: '/' },
-  { label: 'Oyo Care Directory', route: '/find-healthcare' },
-  { label: 'Plans & History', route: '/payments' },
+  { label: 'Care Directory', route: '/find-healthcare' },
+  { label: 'Vitals & Watch', route: '/monitoring' },
   { label: 'AI Assistant', route: '/ai-assistant' },
   { label: 'Emergency', route: '/emergency' },
-  { label: 'About', route: '/about' },
+  { label: 'Plans & History', route: '/payments' },
 ];
 
 export function Navbar() {
@@ -56,8 +56,7 @@ export function Navbar() {
           onClick={() => handleNav({ label: 'Home', route: '/' })}
           className="text-left text-base sm:text-lg font-bold tracking-tight text-[#0F0E47] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#272757] rounded-md px-1 py-1 cursor-pointer"
         >
-          <span className="hidden sm:inline">HealthConnect Oyo State</span>
-          <span className="sm:hidden">HealthConnect Oyo</span>
+          <span>HealthConnect</span>
         </button>
 
         {/* Zone 2: Desktop Links (Home & Hybrid AI available offline/publicly; full links once signed in) */}

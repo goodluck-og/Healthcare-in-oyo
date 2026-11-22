@@ -18,9 +18,9 @@ interface BottomTab {
 
 const MOBILE_TABS: BottomTab[] = [
   { label: 'Dashboard', route: '/dashboard', icon: LayoutDashboard },
-  { label: 'Oyo Care', route: '/find-healthcare', icon: Stethoscope },
+  { label: 'Care', route: '/find-healthcare', icon: Stethoscope },
   { label: 'Hybrid AI', route: '/ai-assistant', icon: Sparkles },
-  { label: 'Plans', route: '/payments', icon: CreditCard },
+  { label: 'Vitals', route: '/monitoring', icon: CreditCard },
   { label: 'Emergency', route: '/emergency', icon: PhoneCall, isEmergency: true },
 ];
 

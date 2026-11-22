@@ -42,8 +42,24 @@ export async function callAiHealthAssistant(payload: {
   model?: string;
   mode: string;
   patientContext?: string;
+  image?: {
+    mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+    base64Data: string;
+    categoryHint?: string;
+  };
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-}): Promise<{ reply: string; provider: string; model?: string; authenticatedUid?: string | null }> {
+}): Promise<{
+  reply: string;
+  provider: string;
+  model?: string;
+  authenticatedUid?: string | null;
+  redFlagDetected?: boolean;
+  haltEducationalDialogue?: boolean;
+  matchedKeywords?: string[];
+  matchedCategories?: string[];
+  urgentFooter?: string;
+  emergencyRoute?: '/emergency';
+}> {
   const headers = await getAuthHeaders();
   const res = await fetch('/api/ai/health-assistant', {
     method: 'POST',
@@ -55,6 +71,12 @@ export async function callAiHealthAssistant(payload: {
     provider?: string;
     model?: string;
     authenticatedUid?: string | null;
+    redFlagDetected?: boolean;
+    haltEducationalDialogue?: boolean;
+    matchedKeywords?: string[];
+    matchedCategories?: string[];
+    urgentFooter?: string;
+    emergencyRoute?: '/emergency';
     error?: string;
   }>(res);
   if (!res.ok || !data.reply) {
@@ -65,6 +87,49 @@ export async function callAiHealthAssistant(payload: {
     provider: data.provider || payload.provider,
     model: data.model,
     authenticatedUid: data.authenticatedUid,
+    redFlagDetected: Boolean(data.redFlagDetected),
+    haltEducationalDialogue: Boolean(data.haltEducationalDialogue),
+    matchedKeywords: data.matchedKeywords,
+    matchedCategories: data.matchedCategories,
+    urgentFooter: data.urgentFooter,
+    emergencyRoute: data.emergencyRoute,
+  };
+}
+
+export interface OpenFdaDrugEntry {
+  brandName: string;
+  genericName: string;
+  route: string;
+  purpose: string;
+  warnings: string;
+  dosageSummary: string;
+}
+
+export async function lookupOpenFdaDrug(queryText: string): Promise<{
+  query: string;
+  source: string;
+  results: OpenFdaDrugEntry[];
+  message?: string;
+  disclaimer?: string;
+}> {
+  const res = await fetch(`/api/medical/drug-lookup?q=${encodeURIComponent(queryText.trim())}`);
+  const data = await safeReadJson<{
+    query?: string;
+    source?: string;
+    results?: OpenFdaDrugEntry[];
+    message?: string;
+    disclaimer?: string;
+    error?: string;
+  }>(res);
+  if (!res.ok) {
+    throw new Error(data.error || `Unable to look up medication (${res.status})`);
+  }
+  return {
+    query: data.query || queryText,
+    source: data.source || 'openFDA Drug Labeling API',
+    results: data.results || [],
+    message: data.message,
+    disclaimer: data.disclaimer,
   };
 }
 

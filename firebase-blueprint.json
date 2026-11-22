@@ -56,12 +56,23 @@
         "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
         "relationship": { "type": "string", "enum": ["Self (Primary)", "Child Dependent", "Parent"] },
+        "dateOfBirth": { "type": "string", "maxLength": 16 },
         "age": { "type": "number" },
         "gender": { "type": "string", "maxLength": 32 },
+        "genderConfirmed": { "type": "string", "enum": ["female", "male", "not_specified"] },
         "city": { "type": "string", "maxLength": 60 },
+        "countryCode": { "type": "string", "maxLength": 8 },
+        "emergencyNumber": { "type": "string", "maxLength": 16 },
         "bloodGroup": { "type": "string", "maxLength": 8 },
         "genotype": { "type": "string", "maxLength": 8 },
         "allergies": { "type": "array" },
+        "chronicConditions": { "type": "array" },
+        "currentMedications": { "type": "array" },
+        "isGuardianManaged": { "type": "boolean" },
+        "onboardingCompleted": { "type": "boolean" },
+        "enabledModules": { "type": "array" },
+        "qrSharedFields": { "type": "array" },
+        "healthNeedPreferences": { "type": "object" },
         "hmoProvider": { "type": "string", "maxLength": 120 },
         "demoMemberId": { "type": "string", "maxLength": 40 },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -361,6 +372,29 @@
         "processed_at": { "type": "string", "format": "date-time" }
       },
       "required": ["event_id", "event_type", "transaction_reference", "processing_status", "received_at"]
+    },
+    "WearableReading": {
+      "title": "WearableReading",
+      "description": "Smartwatch or wearable vital reading with explicit source labeling and critical-alert metadata.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "source": { "type": "string", "enum": ["web_bluetooth", "manual", "simulator"] },
+        "deviceName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "heartRateBpm": { "type": "number" },
+        "spo2Percent": { "type": "number" },
+        "systolic": { "type": "number" },
+        "diastolic": { "type": "number" },
+        "temperatureC": { "type": "number" },
+        "steps": { "type": "number" },
+        "sleepHours": { "type": "number" },
+        "recordedAt": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "criticalAlertTriggered": { "type": "boolean" },
+        "alertReason": { "type": "string", "maxLength": 240 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "profileId", "source", "deviceName", "heartRateBpm", "spo2Percent", "recordedAt", "createdAt"]
     }
   },
   "firestore": {
@@ -447,6 +481,10 @@
     "/webhookEvents/{eventId}": {
       "schema": { "$ref": "#/entities/WebhookEventRecord" },
       "description": "Deduplicated Interswitch webhook delivery events (admin read-only)."
+    },
+    "/wearableReadings/{readingId}": {
+      "schema": { "$ref": "#/entities/WearableReading" },
+      "description": "Owner-isolated smartwatch and wearable vital logs."
     }
   }
 }

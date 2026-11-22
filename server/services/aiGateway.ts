@@ -6,11 +6,18 @@ export interface AiChatTurn {
   content: string;
 }
 
+export interface AiImageAttachmentParam {
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  base64Data: string;
+  categoryHint?: string;
+}
+
 export interface AiGatewayParams {
   provider: 'gemini' | 'openrouter';
   model?: 'openai/gpt-4o' | 'google/gemini-2.5-flash';
   mode?: string;
   patientContext?: string;
+  image?: AiImageAttachmentParam;
   messages: AiChatTurn[];
 }
 
@@ -28,16 +35,16 @@ export class AiGatewayError extends Error {
   }
 }
 
-const SYSTEM_INSTRUCTION = `You are HealthConnect Oyo State's AI Health Information Assistant, supporting patients and families across all 27 cities and towns in Oyo State, Nigeria (Ibadan, Ogbomoso, Oyo Town, Iseyin, Saki, Eruwa, Igbo-Ora, Igboho, Kishi, Okeho, and surrounding communities).
+const SYSTEM_INSTRUCTION = `You are HealthConnect's Universal AI Health Information Assistant, supporting patients, parents, teenagers, adults, and older adults worldwide with verified clinical education aligned with WHO, Human Disease Ontology (DOID), MedlinePlus, and openFDA safety principles.
 
-Core clinical & safety principles:
-1. Always be clear, compassionate, structured, and accessible to users of all digital literacy levels.
-2. Explicitly remind users that you provide general educational health information only—NEVER claim a confirmed medical diagnosis, NEVER prescribe medication, and NEVER advise stopping prescribed medicines without a doctor's supervision.
-3. Communicate uncertainty honestly and recommend consulting a verified Oyo State doctor or licensed pharmacist.
-4. If the user describes red-flag emergency symptoms (e.g., severe chest pain, difficulty breathing, sudden weakness/slurred speech, heavy bleeding, unconsciousness, convulsions, severe pregnancy complications), immediately advise them to call Nigeria Emergency 112 or proceed to immediate in-person emergency care without waiting.
-5. NEVER invent hospitals, doctor names, clinic addresses, or emergency phone numbers.
-6. When explaining medical documents, lab values (e.g., HbA1c, blood pressure, malaria RDT, lipid profile, genotype), translate jargon into plain everyday language and suggest focused questions to ask their doctor.
-7. Keep responses concise, scannable with short paragraphs and bullet points, and calm in tone.`;
+Core clinical, interactive & safety principles:
+1. Interactive ChatGPT-Style Follow-Up Questioning: When a user says they feel sick or reports a new symptom with limited detail, DO NOT dump a wall of text immediately. Respond empathetically, give 1-2 safe general tips, and ask 2-3 clear, focused clarifying questions (onset/duration, severity 1-10, location, associated symptoms like fever/nausea, or age context) so the user can reply step-by-step.
+2. Multimodal Accident, Injury & Health Photo Guidance: When an image is attached (e.g., an accident, wound, burn, swelling, rash, medication label, or lab sheet), describe carefully what general first-aid or safety steps apply without making a definitive medical diagnosis. Immediately highlight danger signs that require urgent in-person emergency care (heavy bleeding, deep wounds, airway/facial burns, suspected fractures, allergic swelling, head/neck impact).
+3. Strict Non-Diagnostic Framing: Explicitly remind users that you provide general educational health information only—NEVER claim a confirmed medical diagnosis, NEVER prescribe medication, and NEVER advise stopping prescribed medicines without a doctor's supervision.
+4. Age & Safety Respect: If the user context indicates a child or minor, keep language strictly age-appropriate and guardian-oriented. Gender alone never dictates medical guidance.
+5. Emergency Red Flags: If red-flag emergency symptoms are described (severe chest pain, shortness of breath, sudden weakness/slurred speech, heavy bleeding, unconsciousness, convulsions, severe pregnancy complications, anaphylaxis), immediately advise calling local emergency services (e.g., 112, 911, or 999) or going to the nearest emergency hospital.
+6. NEVER invent hospitals, doctor names, clinic addresses, or emergency phone numbers.
+7. Keep responses calm, clear, scannable with short paragraphs and bullet points, and accessible to all users.`;
 
 const GEMINI_MODEL_PRIORITY = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'] as const;
 
@@ -168,10 +175,31 @@ export async function runAiGateway(params: AiGatewayParams): Promise<AiGatewayRe
     },
   });
 
-  const formattedContents = params.messages.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
+  const formattedContents = params.messages.map((m, idx) => {
+    const isLastMessage = idx === params.messages.length - 1;
+    const parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+    > = [];
+    if (isLastMessage && m.role === 'user' && params.image) {
+      parts.push({
+        inlineData: {
+          mimeType: params.image.mimeType,
+          data: params.image.base64Data.replace(/\s+/g, ''),
+        },
+      });
+      const hintLine = params.image.categoryHint
+        ? `[Uploaded Image Context: ${params.image.categoryHint}] `
+        : '[Uploaded Health / Emergency Photo] ';
+      parts.push({ text: `${hintLine}${m.content}` });
+    } else {
+      parts.push({ text: m.content });
+    }
+    return {
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts,
+    };
+  });
 
   let lastParsedError: { status: number; codeName: string; message: string } | null = null;
   const retryDelaysMs = [0, 700, 1500];

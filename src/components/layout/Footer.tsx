@@ -11,14 +11,14 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-white/10">
           <div className="lg:col-span-4 space-y-4">
             <div className="text-xl font-bold tracking-tight">
-              HealthConnect <span className="font-display-italic font-normal text-[#C7C8E6]">Oyo State</span>
+              HealthConnect
             </div>
             <p className="text-sm text-[#C7C8E6] leading-relaxed max-w-sm">
-              Connected healthcare for Oyo State — talk to verified doctors online first under simple Individual (₦16,000/mo) or Family of 5 (₦50,000/mo) plans, then schedule physical exams together across Oyo State.
+              Universal Hybrid AI healthcare platform for every age group — personalised care dashboards, verified DOID/WHO offline medical knowledge, smartwatch GPS safety, offline Emergency Medical QR, and Oyo/Nigeria clinical care.
             </p>
             <div className="flex items-start gap-2.5 text-xs text-[#C7C8E6] pt-1">
               <MapPin className="w-4 h-4 text-[#E8702A] shrink-0 mt-0.5" />
-              <span>Ibadan · Ogbomoso · Oyo Town · Iseyin · Saki · Eruwa &amp; 27 Oyo Towns</span>
+              <span>Universal Emergency Presets (112 · 911 · 999) · Nigeria &amp; Oyo State Care Network</span>
             </div>
           </div>
 
@@ -104,7 +104,7 @@ export function Footer() {
         </div>
 
         <div className="pt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-[#8686AC]">
-          <p>© 2026 HealthConnect Oyo State. Connected healthcare for Oyo State.</p>
+          <p>© 2026 HealthConnect. Universal Hybrid AI Healthcare &amp; Emergency Safety Platform.</p>
           <p>
             Interswitch Web Redirect Checkout active · Sandbox mode uses official test credentials without charging real funds.
           </p>

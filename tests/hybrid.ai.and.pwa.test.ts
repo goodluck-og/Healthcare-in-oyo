@@ -292,11 +292,11 @@ describe('PWA Manifest, Icons & Privacy-Strict Service Worker Configuration', ()
     }
   });
 
-  it('configures VitePWA with HealthConnect Oyo State manifest and NetworkOnly privacy rules for patient APIs', () => {
+  it('configures VitePWA with HealthConnect manifest and NetworkOnly privacy rules for patient APIs', () => {
     const viteConfig = fs.readFileSync(path.join(ROOT, 'vite.config.ts'), 'utf8');
     expect(viteConfig).toContain('VitePWA(');
-    expect(viteConfig).toContain("name: 'HealthConnect Oyo State'");
-    expect(viteConfig).toContain("short_name: 'HealthOyo'");
+    expect(viteConfig).toContain("name: 'HealthConnect'");
+    expect(viteConfig).toContain("short_name: 'HealthConnect'");
     expect(viteConfig).toContain("display: 'standalone'");
     expect(viteConfig).toContain("handler: 'NetworkOnly'");
     expect(viteConfig).toContain('firestore.googleapis.com');

@@ -256,19 +256,86 @@ export interface MedicationReminder {
   lastTakenDate?: string;
 }
 
+export type AgeLifeStage =
+  | 'child'
+  | 'teen'
+  | 'young_adult'
+  | 'adult'
+  | 'older_adult';
+
+export type ConfirmedGender = 'female' | 'male' | 'not_specified';
+
+export interface HealthNeedPreferences {
+  includeFemaleHealth: boolean;
+  includeMaleHealth: boolean;
+  includeChronicCare: boolean;
+  includeFitnessAndNutrition: boolean;
+  includeWearableMonitoring: boolean;
+  includeCaregiverTools: boolean;
+}
+
 export interface FamilyProfile {
   id: string;
   ownerUid?: string;
   fullName: string;
   relationship: 'Self (Primary)' | 'Child Dependent' | 'Parent';
+  /** ISO date string YYYY-MM-DD — single source of truth for DOB-calculated age */
+  dateOfBirth?: string;
   age: number;
   gender: string;
+  genderConfirmed?: ConfirmedGender;
   city: string;
+  countryCode?: string;
+  emergencyNumber?: string;
   bloodGroup: string;
   genotype: string;
   allergies: string[];
+  chronicConditions?: string[];
+  currentMedications?: string[];
+  isGuardianManaged?: boolean;
+  onboardingCompleted?: boolean;
+  healthNeedPreferences?: HealthNeedPreferences;
+  enabledModules?: string[];
+  qrSharedFields?: string[];
   hmoProvider: string;
   demoMemberId: string;
+}
+
+export type WearableReadingSource = 'web_bluetooth' | 'manual' | 'simulator';
+
+export interface WearableReading {
+  id: string;
+  ownerUid?: string;
+  profileId: string;
+  source: WearableReadingSource;
+  deviceName: string;
+  heartRateBpm: number;
+  spo2Percent: number;
+  systolic?: number;
+  diastolic?: number;
+  temperatureC?: number;
+  steps?: number;
+  sleepHours?: number;
+  recordedAt: string;
+  criticalAlertTriggered?: boolean;
+  alertReason?: string;
+}
+
+export interface WearableThresholds {
+  minHeartRateBpm: number;
+  maxHeartRateBpm: number;
+  minSpo2Percent: number;
+  maxSystolicMmHg: number;
+  maxDiastolicMmHg: number;
+  maxTemperatureC: number;
+}
+
+export interface ChatImageAttachment {
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  base64Data: string;
+  previewDataUrl: string;
+  fileName: string;
+  categoryHint?: string;
 }
 
 export interface EmergencyContact {

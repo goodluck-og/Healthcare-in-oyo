@@ -103,14 +103,14 @@ export function HeroSection() {
               <div className="space-y-2">
                 <p className="text-xs font-semibold tracking-wide text-[#FFB585] flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  Connected healthcare for Oyo State · All 27 Oyo Cities &amp; Towns
+                  Universal Hybrid AI Healthcare · Personalised for Every Age &amp; Device
                 </p>
                 <h1 className="text-3xl sm:text-[2.15rem] font-bold tracking-tight leading-[1.12] text-white">
-                  HealthConnect Oyo State
+                  HealthConnect
                 </h1>
                 <p className="text-sm text-[#C7C8E6] leading-relaxed">
-                  Talk to verified Oyo State doctors online first, then decide together when to book
-                  a physical exam. Individual plan ₦16,000/mo or Netflix-style Family of 5 plan ₦50,000/mo.
+                  Verified offline &amp; Cloud AI symptom guidance, emergency accident photo first aid,
+                  smartwatch GPS vital alerts, offline Medical QR ID, and verified clinical bookings.
                 </p>
               </div>
 
@@ -141,17 +141,17 @@ export function HeroSection() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate('/find-healthcare')}
+                      onClick={() => navigate('/ai-assistant')}
                       className="w-full inline-flex items-center justify-center gap-2 py-3 min-h-[46px] rounded-xl bg-[#272757] hover:bg-[#353574] border border-white/15 text-white text-sm font-semibold transition-colors cursor-pointer"
                     >
-                      <span>Talk to an Oyo State Doctor Online</span>
+                      <span>Open Hybrid AI &amp; Photo First Aid</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate('/payments')}
+                      onClick={() => navigate('/monitoring')}
                       className="w-full inline-flex items-center justify-center gap-2 py-3 min-h-[46px] rounded-xl bg-white/10 hover:bg-white/16 border border-white/15 text-white text-sm font-semibold transition-colors cursor-pointer"
                     >
-                      <span>Monthly Plans (₦16k / ₦50k) &amp; Payment History</span>
+                      <span>Smartwatch Vitals &amp; GPS Safety Hub</span>
                     </button>
                     <button
                       type="button"
@@ -159,7 +159,7 @@ export function HeroSection() {
                       className="w-full inline-flex items-center justify-center gap-2 py-3 min-h-[46px] rounded-xl bg-[#E5484D] hover:bg-[#C9363B] text-white text-sm font-semibold transition-colors cursor-pointer"
                     >
                       <PhoneCall className="w-4 h-4" />
-                      <span>24/7 Oyo Emergency Triage</span>
+                      <span>24/7 Emergency Centre &amp; Medical QR</span>
                     </button>
                   </div>
                 </div>
@@ -181,12 +181,8 @@ export function HeroSection() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => switchMode('register')}
-                      className={`py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                        panelMode === 'register'
-                          ? 'bg-[#272757] text-white'
-                          : 'text-[#A6A8D6] hover:text-white'
-                      }`}
+                      onClick={() => navigate('/register')}
+                      className="py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer text-[#FFB585] hover:text-white"
                     >
                       Create Account
                     </button>

@@ -6,6 +6,7 @@ import {
   BookmarkPlus,
   BookOpen,
   Bot,
+  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -20,6 +21,7 @@ import {
   Mic,
   MicOff,
   PhoneCall,
+  Pill,
   RotateCcw,
   Search,
   Send,
@@ -31,6 +33,7 @@ import {
   User,
   Wifi,
   WifiOff,
+  X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AnatomyExplorer } from '../components/ai/AnatomyExplorer';
@@ -41,6 +44,7 @@ import {
   type OfflineHealthGuide,
 } from '../data/offlineHealthLibrary';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { lookupOpenFdaDrug, type OpenFdaDrugEntry } from '../services/apiClient';
 import {
   detectOnDeviceAiCapability,
   type OnDeviceCapabilityInfo,
@@ -49,6 +53,7 @@ import {
   routeHybridHealthQuery,
   type ActualAiProcessingPath,
   type CitedOfflineGuide,
+  type CitedOntologyEntry,
 } from '../services/hybridAiRouter';
 import type { UrgentRedFlagAssessment } from '../services/localHealthAi';
 import {
@@ -61,7 +66,7 @@ import {
   type AiPrivacyPreferences,
   type HybridRoutingPreference,
 } from '../services/offlineLibraryStore';
-import type { AiConsultation } from '../types/healthcare';
+import type { AiConsultation, ChatImageAttachment } from '../types/healthcare';
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -120,10 +125,65 @@ function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null 
   return win.SpeechRecognition || win.webkitSpeechRecognition || null;
 }
 
+const IMAGE_CATEGORY_HINTS = [
+  'Accident / Cut',
+  'Burn / Scald',
+  'Swelling / Sprain',
+  'Skin Rash / Bite',
+  'Medication / Lab Sheet',
+] as const;
+
+async function compressImageFileToAttachment(
+  file: File,
+  categoryHint: string
+): Promise<ChatImageAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the selected photo.'));
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const img = new Image();
+      img.onerror = () => reject(new Error('Selected file is not a supported image.'));
+      img.onload = () => {
+        const maxDim = 1024;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Unable to prepare photo for upload.'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.78);
+        const base64Data = compressedDataUrl.replace(/^data:image\/jpeg;base64,/, '');
+        resolve({
+          mimeType: 'image/jpeg',
+          base64Data,
+          previewDataUrl: compressedDataUrl,
+          fileName: file.name || 'incident-photo.jpg',
+          categoryHint,
+        });
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  imagePreviewUrl?: string;
+  imageCategoryHint?: string;
   actualPath?: ActualAiProcessingPath;
   indicatorLabel?: string;
   indicatorDetail?: string;
@@ -131,7 +191,12 @@ interface ChatMessage {
   model?: string;
   latencyMs?: number;
   redFlag?: UrgentRedFlagAssessment;
+  haltEducationalDialogue?: boolean;
+  urgentFooter?: string;
+  emergencyRoute?: '/emergency';
   citedGuides?: CitedOfflineGuide[];
+  citedOntology?: CitedOntologyEntry[];
+  quickReplies?: string[];
   profileContextSharedWithCloud?: boolean;
   fallbackNotice?: string;
   promptForEscalation?: string;
@@ -141,14 +206,21 @@ const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    'Hello! I am the HealthConnect Oyo State Hybrid AI Health Assistant. I combine on-device intelligence and an 18-chapter offline WHO & Nigeria Health Reference Library with secure Cloud AI for deeper explanations when you are online.\n\nImportant: I provide general health education only — never a confirmed medical diagnosis or prescription. For emergencies, call 112 immediately.',
+    'Hello! I am the HealthConnect Hybrid AI Health Assistant. Tell me how you feel (even simply "I feel sick") and I will ask clear step-by-step follow-up questions in BOTH Local AI and Cloud AI — or attach an accident/wound photo for immediate first-aid safety guidance.\n\nGrounded in Human Disease Ontology (DOID), WHO ICD-11, MedlinePlus, and openFDA drug labels. General health education only — never a confirmed diagnosis. For life-threatening emergencies, call your local emergency number immediately.',
   actualPath: 'local-library',
-  indicatorLabel: 'Local AI: Ready on your device',
-  indicatorDetail: '18 WHO & Nigeria health guides cached locally for instant offline access.',
+  indicatorLabel: 'Local AI + DOID Ontology: Ready on your device',
+  indicatorDetail: 'Verified offline medical guides + interactive intake ready online and offline.',
+  quickReplies: [
+    'I feel sick',
+    'Fever & headache',
+    'Accident / injury first aid',
+    'Explain a lab result',
+  ],
 };
 
 const ASSISTANT_MODES = [
   'General Symptom Guidance',
+  'Emergency First Aid & Photo Aid',
   'Medical Document Explainer',
   'Health Record Summary',
   'Appointment & Referral Prep',
@@ -161,11 +233,11 @@ const OPENROUTER_MODELS = [
 ] as const;
 
 const QUICK_PROMPTS = [
+  'I feel sick — ask me follow-up questions to help narrow it down.',
   'What do normal blood pressure readings mean and when is BP an emergency?',
-  'Explain malaria RDT testing, ACT medicines, and typhoid warning signs in Nigeria.',
+  'Explain malaria RDT testing, ACT medicines, and typhoid warning signs.',
   'Explain what HbA1c 5.4% and Total Cholesterol 184 mg/dL mean in plain language.',
   'What are the BE-FAST signs of stroke and emergency first aid steps?',
-  'How do I manage PCOS symptoms and track cycles on HealthConnect Oyo State?',
 ];
 
 const ROUTING_MODE_OPTIONS: Array<{
@@ -243,6 +315,11 @@ function getPathStyle(path?: ActualAiProcessingPath) {
         textClass: 'text-[#B45309]',
         icon: WifiOff,
       };
+    case 'safety-middleware':
+      return {
+        textClass: 'text-[#DC2626]',
+        icon: ShieldAlert,
+      };
     default:
       return {
         textClass: 'text-[#505081]',
@@ -269,9 +346,23 @@ export function AiAssistantPage() {
 
   const { isOnline } = useOnlineStatus();
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'library' | 'history'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'library' | 'drugs' | 'history'>('chat');
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [showOfflineMatrix, setShowOfflineMatrix] = useState(false);
+
+  // Multimodal emergency/accident photo upload state
+  const [attachedImage, setAttachedImage] = useState<ChatImageAttachment | null>(null);
+  const [imageCategoryHint, setImageCategoryHint] = useState<string>(IMAGE_CATEGORY_HINTS[0]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // openFDA Drug Lookup state
+  const [drugQuery, setDrugQuery] = useState('');
+  const [drugLoading, setDrugLoading] = useState(false);
+  const [drugResults, setDrugResults] = useState<OpenFdaDrugEntry[]>([]);
+  const [drugSource, setDrugSource] = useState<string>('openFDA Official Drug Labels');
+  const [drugMessage, setDrugMessage] = useState<string | null>(null);
+  const [drugError, setDrugError] = useState<string | null>(null);
 
   // Hybrid AI & NDPA Consent preferences (persisted in IndexedDB / localStorage)
   const [privacyPrefs, setPrivacyPrefs] = useState<AiPrivacyPreferences>({
@@ -328,8 +419,9 @@ export function AiAssistantPage() {
   latestInputRef.current = input;
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  const speechSupported = Boolean(getSpeechRecognitionConstructor());
+  const [speechSupported] = useState(() => Boolean(getSpeechRecognitionConstructor()));
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
+  const [dialogueHaltedForEmergency, setDialogueHaltedForEmergency] = useState(false);
 
   // Hydrate preferences, bookmarks, offline guides, and on-device Gemini Nano capability
   useEffect(() => {
@@ -541,11 +633,59 @@ export function AiAssistantPage() {
       ? integrationStatus.geminiConfigured
       : integrationStatus.openrouterConfigured;
 
+  const handlePickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImageError(null);
+    if (!file.type.startsWith('image/')) {
+      setImageError('Please select a photo (JPEG, PNG, or WebP).');
+      return;
+    }
+    try {
+      const compressed = await compressImageFileToAttachment(file, imageCategoryHint);
+      setAttachedImage(compressed);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'Unable to process image.');
+    }
+  };
+
+  const handleDrugLookup = async (e: React.FormEvent, presetQuery?: string) => {
+    e.preventDefault();
+    const q = (presetQuery ?? drugQuery).trim();
+    if (!q) return;
+    setDrugQuery(q);
+    setDrugError(null);
+    setDrugMessage(null);
+    if (!isOnline) {
+      setDrugError('You are offline. Live openFDA drug label lookup requires internet; use the Offline Library or Local AI tab.');
+      return;
+    }
+    setDrugLoading(true);
+    try {
+      const res = await lookupOpenFdaDrug(q);
+      setDrugResults(res.results);
+      setDrugSource(res.source);
+      setDrugMessage(res.message || res.disclaimer || null);
+    } catch (err) {
+      setDrugError(err instanceof Error ? err.message : 'Unable to query openFDA drug database.');
+      setDrugResults([]);
+    } finally {
+      setDrugLoading(false);
+    }
+  };
+
   const sendMessage = async (
     textToSend?: string,
     options?: { isRetry?: boolean; forceCloudEscalation?: boolean }
   ) => {
-    const content = (textToSend ?? input).trim();
+    const rawContent = (textToSend ?? input).trim();
+    const imageToSend = !options?.isRetry && !options?.forceCloudEscalation ? attachedImage : null;
+    const content =
+      rawContent ||
+      (imageToSend
+        ? `Please review this uploaded ${imageToSend.categoryHint || 'health/injury'} photo and tell me immediate first-aid steps and emergency warning signs.`
+        : '');
     if (!content || loading) return;
 
     if (activeTab !== 'chat') {
@@ -560,6 +700,7 @@ export function AiAssistantPage() {
     }
 
     setErrorMsg(null);
+    setImageError(null);
     setLastFailedPrompt(null);
 
     let updatedHistory = messages;
@@ -568,9 +709,14 @@ export function AiAssistantPage() {
         id: `u-${Date.now()}`,
         role: 'user',
         content,
+        imagePreviewUrl: imageToSend?.previewDataUrl,
+        imageCategoryHint: imageToSend?.categoryHint,
       };
       updatedHistory = [...messages, userMsg];
       setMessages(updatedHistory);
+      if (imageToSend) {
+        setAttachedImage(null);
+      }
     }
     if (!textToSend) setInput('');
     setLoading(true);
@@ -592,6 +738,7 @@ export function AiAssistantPage() {
         isOnline,
         serverCloudConfigured: selectedProviderConfigured,
         forceCloudEscalation: options?.forceCloudEscalation,
+        image: imageToSend || undefined,
       });
 
       const assistantMsg: ChatMessage = {
@@ -605,14 +752,23 @@ export function AiAssistantPage() {
         model: hybridResponse.model,
         latencyMs: hybridResponse.latencyMs,
         redFlag: hybridResponse.redFlag,
+        haltEducationalDialogue: hybridResponse.haltEducationalDialogue,
+        urgentFooter: hybridResponse.urgentFooter,
+        emergencyRoute: hybridResponse.emergencyRoute,
         citedGuides: hybridResponse.citedGuides,
+        citedOntology: hybridResponse.citedOntology,
+        quickReplies: hybridResponse.quickReplies,
         profileContextSharedWithCloud: hybridResponse.profileContextSharedWithCloud,
         fallbackNotice: hybridResponse.fallbackNotice,
-        promptForEscalation: content,
+        promptForEscalation: hybridResponse.haltEducationalDialogue ? undefined : content,
       };
 
       const nextThread = [...updatedHistory, assistantMsg];
       setMessages(nextThread);
+
+      if (hybridResponse.haltEducationalDialogue) {
+        setDialogueHaltedForEmergency(true);
+      }
 
       // Persist online signed-in consultations automatically without blocking offline usage
       if (isOnline && ((user.signedIn && user.emailVerified) || isGuestDemo)) {
@@ -656,6 +812,7 @@ export function AiAssistantPage() {
 
   const handleStartNewChat = () => {
     setMessages([WELCOME_MESSAGE]);
+    setDialogueHaltedForEmergency(false);
     setErrorMsg(null);
     setLastFailedPrompt(null);
     setSaveFeedback(null);
@@ -829,13 +986,11 @@ export function AiAssistantPage() {
               <ShieldAlert className="w-5 h-5 text-[#FFB585] shrink-0 mt-0.5" />
               <div>
                 <h1 className="text-lg sm:text-xl font-bold leading-snug">
-                  HealthConnect Oyo State — Hybrid AI Health Assistant
+                  HealthConnect — Hybrid AI &amp; Emergency Photo Assistant
                 </h1>
                 <p className="text-xs sm:text-sm text-[#D7D8EE] mt-1 leading-relaxed">
-                  General health education only — AI does not provide a medical diagnosis or
-                  prescription. For urgent emergencies across Oyo State, call{' '}
-                  <strong className="text-white">112</strong> or open the Emergency Centre
-                  immediately.
+                  Interactive symptom guidance grounded in Human Disease Ontology (DOID), WHO ICD-11, MedlinePlus &amp; openFDA — general health education only, never a medical diagnosis. In an emergency, dial{' '}
+                  <strong className="text-white">{activeProfile?.emergencyNumber || '112'}</strong> or open the Emergency Centre immediately.
                 </p>
               </div>
             </div>
@@ -845,7 +1000,7 @@ export function AiAssistantPage() {
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-[#E5484D] hover:bg-[#C9363B] text-white text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 cursor-pointer"
             >
               <PhoneCall className="w-4 h-4" />
-              <span>Emergency Centre (112)</span>
+              <span>Emergency Centre ({activeProfile?.emergencyNumber || '112'})</span>
             </button>
           </div>
 
@@ -1210,6 +1365,20 @@ export function AiAssistantPage() {
                   <button
                     type="button"
                     role="tab"
+                    aria-selected={activeTab === 'drugs'}
+                    onClick={() => setActiveTab('drugs')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      activeTab === 'drugs'
+                        ? 'bg-[#272757] text-white'
+                        : 'text-[#505081] hover:text-[#0F0E47]'
+                    }`}
+                  >
+                    <Pill className="w-3.5 h-3.5" />
+                    <span>Drug Lookup</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
                     aria-selected={activeTab === 'history'}
                     onClick={() => setActiveTab('history')}
                     className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
@@ -1269,8 +1438,10 @@ export function AiAssistantPage() {
                             ?.label
                         }`
                       : activeTab === 'library'
-                      ? `Curated WHO & Nigeria Offline Health Library (${offlineGuides.length} Chapters)`
-                      : `Stored AI Health Summaries (${aiConsultations.length})`}
+                        ? `Verified DOID & WHO Offline Health Library (${offlineGuides.length} Chapters)`
+                        : activeTab === 'drugs'
+                          ? 'Verified Medication Label Lookup (openFDA Official API)'
+                          : `Stored AI Health Summaries (${aiConsultations.length})`}
                   </span>
                 </span>
 
@@ -1345,8 +1516,60 @@ export function AiAssistantPage() {
                             </div>
                           )}
 
+                          {/* Attached Incident / Health Photo Thumbnail */}
+                          {m.imagePreviewUrl && (
+                            <div className="space-y-1">
+                              <img
+                                src={m.imagePreviewUrl}
+                                alt={m.imageCategoryHint || 'Uploaded health photo'}
+                                className="max-h-52 rounded-xl object-cover border border-white/20"
+                              />
+                              {m.imageCategoryHint && (
+                                <p className="text-[11px] opacity-80">
+                                  Photo context: {m.imageCategoryHint}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
                           {/* Main Message Body */}
                           <div className="whitespace-pre-line">{m.content}</div>
+
+                          {/* Mandatory Middleware Footer & Direct EmergencyPage Link */}
+                          {m.role === 'assistant' && m.haltEducationalDialogue && (
+                            <div
+                              role="alert"
+                              className="rounded-xl bg-[#991B1B] text-white p-3.5 space-y-2.5"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs font-extrabold tracking-wide uppercase">
+                                  {m.urgentFooter || 'Urgent: Seek Professional Care'}
+                                </span>
+                                {m.redFlag?.matchedKeywords &&
+                                  m.redFlag.matchedKeywords.length > 0 && (
+                                    <span className="text-[11px] text-[#FECACA]">
+                                      Flagged: {m.redFlag.matchedKeywords.join(', ')}
+                                    </span>
+                                  )}
+                              </div>
+                              <p className="text-xs text-[#FEE2E2] leading-relaxed">
+                                Educational AI dialogue has been stopped. Proceed directly to the
+                                Emergency Centre or dial <strong>112</strong> now.
+                              </p>
+                              <a
+                                href={m.emergencyRoute || '/emergency'}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  navigate(m.emergencyRoute || '/emergency');
+                                }}
+                                className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl bg-white hover:bg-[#FEF2F2] text-[#991B1B] text-xs sm:text-sm font-bold transition-colors cursor-pointer"
+                              >
+                                <PhoneCall className="w-4 h-4" />
+                                <span>Go Directly to EmergencyPage</span>
+                                <ArrowUpRight className="w-4 h-4" />
+                              </a>
+                            </div>
+                          )}
 
                           {/* Automatic Fallback Notice */}
                           {m.role === 'assistant' && m.fallbackNotice && (
@@ -1360,7 +1583,7 @@ export function AiAssistantPage() {
                             m.citedGuides &&
                             m.citedGuides.length > 0 && (
                               <div className="pt-1 flex flex-wrap items-center gap-2 text-[11px]">
-                                <span className="font-semibold text-[#505081]">Sources:</span>
+                                <span className="font-semibold text-[#505081]">Guides:</span>
                                 {m.citedGuides.map((g) => (
                                   <button
                                     key={g.id}
@@ -1370,6 +1593,41 @@ export function AiAssistantPage() {
                                   >
                                     <span>{g.title}</span>
                                     <ArrowUpRight className="w-3 h-3" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                          {/* Verified Human Disease Ontology (DOID) & ICD-11 Citations */}
+                          {m.role === 'assistant' &&
+                            m.citedOntology &&
+                            m.citedOntology.length > 0 && (
+                              <div className="pt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#505081]">
+                                <span className="font-semibold text-[#272757]">Medical Ontology:</span>
+                                {m.citedOntology.map((o) => (
+                                  <span key={o.doid} className="font-mono text-[10px]">
+                                    {o.name} ({o.doid} · ICD-11 {o.icd11})
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                          {/* Interactive ChatGPT-Style Follow-Up Quick-Reply Chips (Latest assistant reply) */}
+                          {m.role === 'assistant' &&
+                            !dialogueHaltedForEmergency &&
+                            !loading &&
+                            m.id === messages[messages.length - 1]?.id &&
+                            m.quickReplies &&
+                            m.quickReplies.length > 0 && (
+                              <div className="pt-2 flex flex-wrap gap-1.5">
+                                {m.quickReplies.map((replyChip) => (
+                                  <button
+                                    key={replyChip}
+                                    type="button"
+                                    onClick={() => void sendMessage(replyChip)}
+                                    className="px-3 py-1.5 min-h-[34px] rounded-lg bg-white hover:bg-[#ECEEF9] border border-[#272757]/20 text-[11px] font-semibold text-[#272757] transition-colors cursor-pointer"
+                                  >
+                                    {replyChip}
                                   </button>
                                 ))}
                               </div>
@@ -1486,7 +1744,45 @@ export function AiAssistantPage() {
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* Chat Composer & Voice Dictation */}
+                {/* Chat Composer OR Halted Emergency Escalation Panel */}
+                {dialogueHaltedForEmergency ? (
+                  <div
+                    role="alert"
+                    className="p-4 sm:p-5 border-t-2 border-[#E5484D] bg-[#FEF2F2] space-y-3"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <ShieldAlert className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-[#991B1B]">
+                          Urgent: Seek Professional Care — Educational Chat Paused
+                        </p>
+                        <p className="text-xs text-[#7F1D1D] leading-relaxed">
+                          A medical red-flag keyword was detected. Rather than continuing an
+                          educational dialogue, please proceed directly to the Emergency Centre or
+                          dial <strong>112</strong> immediately.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/emergency')}
+                        className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[46px] rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white text-sm font-bold transition-colors cursor-pointer"
+                      >
+                        <PhoneCall className="w-4 h-4" />
+                        <span>Open EmergencyPage Now (112)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleStartNewChat}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-3 min-h-[46px] rounded-xl bg-white hover:bg-[#FFF5F5] border border-[#DC2626]/30 text-[#991B1B] text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Start New Non-Urgent Chat</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                 <div className="p-3.5 sm:p-4 border-t border-[#272757]/10 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#505081]">
                     <div className="flex items-center gap-2">
@@ -1565,6 +1861,66 @@ export function AiAssistantPage() {
                     </div>
                   )}
 
+                  {imageError && (
+                    <div className="rounded-xl bg-[#E5484D]/10 border border-[#E5484D]/25 px-3.5 py-2 text-xs text-[#9C2327] flex items-center justify-between gap-2">
+                      <span>{imageError}</span>
+                      <button
+                        type="button"
+                        onClick={() => setImageError(null)}
+                        className="font-semibold underline shrink-0 cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Attached Accident / Health Photo Preview & Category Selector */}
+                  {attachedImage && (
+                    <div className="rounded-xl bg-[#F5F6FC] border border-[#272757]/15 p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                      <img
+                        src={attachedImage.previewDataUrl}
+                        alt="Attached photo preview"
+                        className="w-16 h-16 rounded-lg object-cover border border-[#272757]/15 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-[#0F0E47] truncate">
+                            Photo ready: {attachedImage.fileName}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAttachedImage(null)}
+                            aria-label="Remove attached photo"
+                            className="p-1 rounded-lg hover:bg-white text-[#505081] cursor-pointer"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {IMAGE_CATEGORY_HINTS.map((hint) => (
+                            <button
+                              key={hint}
+                              type="button"
+                              onClick={() => {
+                                setImageCategoryHint(hint);
+                                setAttachedImage((prev) =>
+                                  prev ? { ...prev, categoryHint: hint } : prev
+                                );
+                              }}
+                              className={`px-2 py-1 rounded-md text-[10px] font-semibold cursor-pointer ${
+                                (attachedImage.categoryHint || imageCategoryHint) === hint
+                                  ? 'bg-[#272757] text-white'
+                                  : 'bg-white border border-[#272757]/15 text-[#505081]'
+                              }`}
+                            >
+                              {hint}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -1572,6 +1928,30 @@ export function AiAssistantPage() {
                     }}
                     className="flex gap-2"
                   >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => void handlePickPhoto(e)}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Upload accident or health photo"
+                      title="Upload accident, burn, wound, rash, or medication photo"
+                      className={`inline-flex items-center justify-center gap-1.5 px-3 py-3 min-h-[46px] min-w-[46px] rounded-xl border text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                        attachedImage
+                          ? 'bg-[#E8702A] text-white border-[#E8702A]'
+                          : 'bg-[#F5F6FC] hover:bg-[#E8EAF7] text-[#272757] border-[#272757]/15'
+                      }`}
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span className="hidden md:inline text-xs">Photo</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={toggleVoiceDictation}
@@ -1597,12 +1977,16 @@ export function AiAssistantPage() {
                       aria-label="Ask the Hybrid AI Health Assistant"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      placeholder="Ask about symptoms, lab terms, BP, malaria, PCOS, or first aid..."
+                      placeholder={
+                        attachedImage
+                          ? 'Add details about this photo (or tap Send for immediate first-aid guidance)...'
+                          : 'Say "I feel sick", ask about symptoms, or attach an emergency photo...'
+                      }
                       className="flex-1 min-w-0 px-3.5 py-3 min-h-[46px] rounded-xl bg-[#F5F6FC] border border-[#272757]/15 text-sm text-[#0F0E47]"
                     />
                     <button
                       type="submit"
-                      disabled={loading || !input.trim()}
+                      disabled={loading || (!input.trim() && !attachedImage)}
                       className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-3 min-h-[46px] rounded-xl bg-[#272757] hover:bg-[#0F0E47] disabled:opacity-50 text-white text-sm font-semibold transition-colors cursor-pointer shrink-0"
                     >
                       {loading ? (
@@ -1614,6 +1998,7 @@ export function AiAssistantPage() {
                     </button>
                   </form>
                 </div>
+                )}
               </>
             )}
 
@@ -1627,6 +2012,98 @@ export function AiAssistantPage() {
                   onAskAboutGuide={handleAskAboutGuide}
                   isOnline={isOnline}
                 />
+              </div>
+            )}
+
+            {/* TAB 2B: VERIFIED MEDICATION LABEL LOOKUP (openFDA) */}
+            {activeTab === 'drugs' && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                <div className="rounded-xl bg-[#F5F6FC] border border-[#272757]/12 p-4 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#0F0E47] flex items-center gap-2">
+                      <Pill className="w-4 h-4 text-[#E8702A]" />
+                      Verified Medication Label Lookup (openFDA)
+                    </h3>
+                    <p className="text-xs text-[#505081] mt-0.5 leading-relaxed">
+                      Search official FDA medication label summaries for purpose, warnings, and dosing context. Educational reference only — confirm dosing with a pharmacist or doctor.
+                    </p>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => void handleDrugLookup(e)}
+                    className="flex flex-col sm:flex-row gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={drugQuery}
+                      onChange={(e) => setDrugQuery(e.target.value)}
+                      placeholder="Enter generic or brand drug (e.g. Ibuprofen, Metformin, Amlodipine, Amoxicillin)"
+                      className="flex-1 px-3.5 py-2.5 min-h-[44px] rounded-xl bg-white border border-[#272757]/20 text-sm text-[#0F0E47]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={drugLoading || !drugQuery.trim()}
+                      className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 min-h-[44px] rounded-xl bg-[#272757] hover:bg-[#0F0E47] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      {drugLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      Search openFDA
+                    </button>
+                  </form>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {['Ibuprofen', 'Metformin', 'Amlodipine', 'Amoxicillin', 'Acetaminophen'].map((sample) => (
+                      <button
+                        key={sample}
+                        type="button"
+                        onClick={(e) => void handleDrugLookup(e, sample)}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-[#272757]/15 text-[11px] font-semibold text-[#272757] hover:bg-[#ECEEF9] cursor-pointer"
+                      >
+                        {sample}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {drugError && (
+                  <div className="rounded-xl bg-[#E5484D]/10 border border-[#E5484D]/25 p-3.5 text-xs text-[#9C2327]">
+                    {drugError}
+                  </div>
+                )}
+
+                {drugMessage && (
+                  <p className="text-[11px] text-[#505081]">{drugMessage}</p>
+                )}
+
+                {drugResults.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-semibold text-[#505081]">
+                      Source: {drugSource} ({drugResults.length} label summaries)
+                    </p>
+                    {drugResults.map((entry, idx) => (
+                      <article
+                        key={`${entry.brandName}-${idx}`}
+                        className="rounded-2xl bg-[#F5F6FC] border border-[#272757]/12 p-4 space-y-2 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-sm font-bold text-[#0F0E47]">
+                            {entry.brandName}{' '}
+                            <span className="font-normal text-[#505081]">({entry.genericName})</span>
+                          </h4>
+                          <span className="font-mono text-[11px] text-[#272757]">{entry.route}</span>
+                        </div>
+                        <p className="text-[#0F0E47] leading-relaxed">
+                          <strong>Purpose / Indications:</strong> {entry.purpose}
+                        </p>
+                        <p className="text-[#9C2327] leading-relaxed">
+                          <strong>Safety Warnings:</strong> {entry.warnings}
+                        </p>
+                        <p className="text-[#505081] leading-relaxed">
+                          <strong>Dosage Summary:</strong> {entry.dosageSummary}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

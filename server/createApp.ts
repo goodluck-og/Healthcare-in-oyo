@@ -36,7 +36,7 @@ export function createApiApp(options: CreateAppOptions = {}) {
   // Capture raw request body for cryptographic HMAC-SHA512 webhook signature verification
   app.use(
     express.json({
-      limit: '1mb',
+      limit: '5mb',
       verify: (req, _res, buf) => {
         (req as AuthenticatedRequest).rawBody = buf.toString('utf8');
       },

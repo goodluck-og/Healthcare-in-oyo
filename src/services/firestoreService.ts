@@ -52,6 +52,7 @@ import type {
   VaccineStatus,
   WalletTransaction,
   WalletTransactionSource,
+  WearableReading,
 } from '../types/healthcare';
 
 const ADMIN_BOOTSTRAP_EMAIL = 'amesinlolagoodluck@gmail.com';
@@ -406,10 +407,53 @@ export async function createFamilyProfileDoc(
       .filter(Boolean)
       .slice(0, 10),
     hmoProvider: sanitizeString(profile.hmoProvider || 'Self-Pay', BLUEPRINT_LIMITS.hmoMaxLength),
+    ...(profile.dateOfBirth ? { dateOfBirth: sanitizeString(profile.dateOfBirth, 16) } : {}),
+    ...(profile.genderConfirmed ? { genderConfirmed: profile.genderConfirmed } : {}),
+    ...(profile.countryCode ? { countryCode: sanitizeString(profile.countryCode, 8) } : {}),
+    ...(profile.emergencyNumber ? { emergencyNumber: sanitizeString(profile.emergencyNumber, 16) } : {}),
+    ...(profile.chronicConditions
+      ? {
+          chronicConditions: profile.chronicConditions
+            .map((c) => sanitizeString(c, 60))
+            .filter(Boolean)
+            .slice(0, 12),
+        }
+      : {}),
+    ...(profile.currentMedications
+      ? {
+          currentMedications: profile.currentMedications
+            .map((m) => sanitizeString(m, 60))
+            .filter(Boolean)
+            .slice(0, 15),
+        }
+      : {}),
+    ...(typeof profile.isGuardianManaged === 'boolean'
+      ? { isGuardianManaged: profile.isGuardianManaged }
+      : {}),
+    ...(typeof profile.onboardingCompleted === 'boolean'
+      ? { onboardingCompleted: profile.onboardingCompleted }
+      : {}),
+    ...(profile.enabledModules
+      ? {
+          enabledModules: profile.enabledModules
+            .map((m) => sanitizeString(m, 60))
+            .filter(Boolean)
+            .slice(0, 20),
+        }
+      : {}),
+    ...(profile.qrSharedFields
+      ? {
+          qrSharedFields: profile.qrSharedFields
+            .map((f) => sanitizeString(f, 32))
+            .filter(Boolean)
+            .slice(0, 10),
+        }
+      : {}),
+    ...(profile.healthNeedPreferences ? { healthNeedPreferences: profile.healthNeedPreferences } : {}),
     demoMemberId,
   };
   try {
-    await setDoc(doc(db, 'familyProfiles', id), {
+    const docPayload: Record<string, unknown> = {
       ownerUid: clean.ownerUid,
       fullName: clean.fullName,
       relationship: clean.relationship,
@@ -423,7 +467,20 @@ export async function createFamilyProfileDoc(
       demoMemberId: clean.demoMemberId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (clean.dateOfBirth) docPayload.dateOfBirth = clean.dateOfBirth;
+    if (clean.genderConfirmed) docPayload.genderConfirmed = clean.genderConfirmed;
+    if (clean.countryCode) docPayload.countryCode = clean.countryCode;
+    if (clean.emergencyNumber) docPayload.emergencyNumber = clean.emergencyNumber;
+    if (clean.chronicConditions) docPayload.chronicConditions = clean.chronicConditions;
+    if (clean.currentMedications) docPayload.currentMedications = clean.currentMedications;
+    if (typeof clean.isGuardianManaged === 'boolean') docPayload.isGuardianManaged = clean.isGuardianManaged;
+    if (typeof clean.onboardingCompleted === 'boolean') docPayload.onboardingCompleted = clean.onboardingCompleted;
+    if (clean.enabledModules) docPayload.enabledModules = clean.enabledModules;
+    if (clean.qrSharedFields) docPayload.qrSharedFields = clean.qrSharedFields;
+    if (clean.healthNeedPreferences) docPayload.healthNeedPreferences = clean.healthNeedPreferences;
+
+    await setDoc(doc(db, 'familyProfiles', id), docPayload);
     return clean;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -446,14 +503,26 @@ export async function updateFamilyProfileDoc(
     if (updates.relationship !== undefined) {
       payload.relationship = updates.relationship;
     }
+    if (updates.dateOfBirth !== undefined) {
+      payload.dateOfBirth = sanitizeString(updates.dateOfBirth, 16);
+    }
     if (updates.age !== undefined) {
       payload.age = Math.max(0, Math.min(120, Math.round(Number(updates.age) || 0)));
     }
     if (updates.gender !== undefined) {
       payload.gender = sanitizeString(updates.gender || 'Not specified', 32);
     }
+    if (updates.genderConfirmed !== undefined) {
+      payload.genderConfirmed = updates.genderConfirmed;
+    }
     if (updates.city !== undefined) {
       payload.city = sanitizeString(updates.city || 'Ibadan', BLUEPRINT_LIMITS.cityMaxLength);
+    }
+    if (updates.countryCode !== undefined) {
+      payload.countryCode = sanitizeString(updates.countryCode, 8);
+    }
+    if (updates.emergencyNumber !== undefined) {
+      payload.emergencyNumber = sanitizeString(updates.emergencyNumber, 16);
     }
     if (updates.bloodGroup !== undefined) {
       payload.bloodGroup =
@@ -470,6 +539,39 @@ export async function updateFamilyProfileDoc(
         .slice(0, 10);
       payload.allergies = cleaned.length > 0 ? cleaned : ['None recorded'];
     }
+    if (updates.chronicConditions !== undefined) {
+      payload.chronicConditions = updates.chronicConditions
+        .map((c) => sanitizeString(c, 60))
+        .filter(Boolean)
+        .slice(0, 12);
+    }
+    if (updates.currentMedications !== undefined) {
+      payload.currentMedications = updates.currentMedications
+        .map((m) => sanitizeString(m, 60))
+        .filter(Boolean)
+        .slice(0, 15);
+    }
+    if (updates.isGuardianManaged !== undefined) {
+      payload.isGuardianManaged = Boolean(updates.isGuardianManaged);
+    }
+    if (updates.onboardingCompleted !== undefined) {
+      payload.onboardingCompleted = Boolean(updates.onboardingCompleted);
+    }
+    if (updates.enabledModules !== undefined) {
+      payload.enabledModules = updates.enabledModules
+        .map((m) => sanitizeString(m, 60))
+        .filter(Boolean)
+        .slice(0, 20);
+    }
+    if (updates.qrSharedFields !== undefined) {
+      payload.qrSharedFields = updates.qrSharedFields
+        .map((f) => sanitizeString(f, 32))
+        .filter(Boolean)
+        .slice(0, 10);
+    }
+    if (updates.healthNeedPreferences !== undefined) {
+      payload.healthNeedPreferences = updates.healthNeedPreferences;
+    }
     if (updates.hmoProvider !== undefined) {
       payload.hmoProvider =
         sanitizeString(updates.hmoProvider, BLUEPRINT_LIMITS.hmoMaxLength) || 'Self-Pay';
@@ -477,6 +579,65 @@ export async function updateFamilyProfileDoc(
     await updateDoc(doc(db, 'familyProfiles', profileId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function createWearableReadingDoc(
+  ownerUid: string,
+  reading: Omit<WearableReading, 'id' | 'ownerUid'>
+): Promise<WearableReading> {
+  const id = makeDocId('wear');
+  const path = `wearableReadings/${id}`;
+  const heartRateBpm = Math.max(20, Math.min(260, Math.round(reading.heartRateBpm)));
+  const spo2Percent = Math.max(50, Math.min(100, Math.round(reading.spo2Percent)));
+  const deviceName = sanitizeString(reading.deviceName || 'Companion Watch', 100) || 'Companion Watch';
+  const recordedAt = sanitizeString(reading.recordedAt || new Date().toISOString().slice(0, 16), 40);
+
+  const payload: Record<string, unknown> = {
+    ownerUid,
+    profileId: sanitizeString(reading.profileId || 'default', 128) || 'default',
+    source: reading.source,
+    deviceName,
+    heartRateBpm,
+    spo2Percent,
+    recordedAt,
+    createdAt: serverTimestamp(),
+  };
+  if (typeof reading.systolic === 'number') {
+    payload.systolic = Math.max(50, Math.min(280, Math.round(reading.systolic)));
+  }
+  if (typeof reading.diastolic === 'number') {
+    payload.diastolic = Math.max(30, Math.min(180, Math.round(reading.diastolic)));
+  }
+  if (typeof reading.temperatureC === 'number') {
+    payload.temperatureC = Math.max(30, Math.min(45, Number(reading.temperatureC.toFixed(1))));
+  }
+  if (typeof reading.steps === 'number') {
+    payload.steps = Math.max(0, Math.min(200000, Math.round(reading.steps)));
+  }
+  if (typeof reading.sleepHours === 'number') {
+    payload.sleepHours = Math.max(0, Math.min(24, Number(reading.sleepHours.toFixed(1))));
+  }
+  if (typeof reading.criticalAlertTriggered === 'boolean') {
+    payload.criticalAlertTriggered = reading.criticalAlertTriggered;
+  }
+  if (reading.alertReason) {
+    payload.alertReason = sanitizeString(reading.alertReason, 240);
+  }
+
+  try {
+    await setDoc(doc(db, 'wearableReadings', id), payload);
+    return {
+      ...reading,
+      id,
+      ownerUid,
+      deviceName,
+      heartRateBpm,
+      spo2Percent,
+      recordedAt,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 
@@ -1547,9 +1708,28 @@ export function subscribePatientWorkspace(
     onEmergencies: (items: EmergencyRequest[]) => void;
     onRoleRequests: (items: RoleRequest[]) => void;
     onAuditLogs: (items: AuditLogEntry[]) => void;
+    onWearableReadings?: (items: WearableReading[]) => void;
   }
 ): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
+
+  if (callbacks.onWearableReadings) {
+    const onWearable = callbacks.onWearableReadings;
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'wearableReadings'), where('ownerUid', '==', uid)),
+        (snap) => {
+          const list = snap.docs.map((d) => ({
+            ...(d.data() as Omit<WearableReading, 'id'>),
+            id: d.id,
+          }));
+          list.sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+          onWearable(list);
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'wearableReadings')
+      )
+    );
+  }
 
   unsubs.push(
     onSnapshot(

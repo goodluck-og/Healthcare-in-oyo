@@ -5,11 +5,22 @@ export const ALLOWED_OPENROUTER_MODELS = [
   'google/gemini-2.5-flash',
 ] as const;
 
+export const aiImageAttachmentSchema = z.object({
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  base64Data: z
+    .string()
+    .min(16, 'Image payload is too small')
+    .max(3_200_000, 'Image must be compressed under 2.4MB before uploading')
+    .regex(/^[A-Za-z0-9+/=\s]+$/, 'Invalid base64 image encoding'),
+  categoryHint: z.string().trim().max(80).optional(),
+});
+
 export const aiHealthAssistantSchema = z.object({
   provider: z.enum(['gemini', 'openrouter']).default('gemini'),
   model: z.enum(ALLOWED_OPENROUTER_MODELS).optional(),
   mode: z.string().trim().max(120).optional(),
   patientContext: z.string().trim().max(2500).optional(),
+  image: aiImageAttachmentSchema.optional(),
   messages: z
     .array(
       z.object({
@@ -19,6 +30,15 @@ export const aiHealthAssistantSchema = z.object({
     )
     .min(1, 'At least one message is required')
     .max(20, 'Conversation window cannot exceed 20 turns'),
+});
+
+export const drugLookupQuerySchema = z.object({
+  q: z
+    .string()
+    .trim()
+    .min(2, 'Enter at least 2 characters for a medication name')
+    .max(80, 'Medication query is too long')
+    .regex(/^[a-zA-Z0-9\s\-+/.()]+$/, 'Medication name contains unsupported characters'),
 });
 
 export const paymentInitSchema = z.object({

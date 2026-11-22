@@ -44,6 +44,7 @@ import {
   createTransactionDoc,
   createVaccinationRecordDoc,
   createWalletTransactionDoc,
+  createWearableReadingDoc,
   deleteAiConsultationDoc,
   deleteCycleLogDoc,
   deleteMedicationReminderDoc,
@@ -72,6 +73,11 @@ import {
   writeAuditLog,
 } from '../services/firestoreService';
 import { fetchIntegrationStatus, initializeInterswitchCheckout } from '../services/apiClient';
+import {
+  calculateAgeFromDob,
+  deriveDefaultPreferences,
+  resolveAgeStage,
+} from '../services/personalisationEngine';
 import type {
   ActiveSubscription,
   AiConsultation,
@@ -80,6 +86,7 @@ import type {
   AuditLogEntry,
   BloodPressureReading,
   CheckoutDraft,
+  ConfirmedGender,
   Coordinates,
   CycleLog,
   EmergencyContact,
@@ -87,6 +94,7 @@ import type {
   FamilyProfile,
   FlowIntensity,
   GlucoseReading,
+  HealthNeedPreferences,
   IntegrationStatus,
   LabResult,
   MedicalDocument,
@@ -107,7 +115,32 @@ import type {
   VaccineStatus,
   WalletTransaction,
   WalletTransactionSource,
+  WearableReading,
 } from '../types/healthcare';
+
+export interface HealthOnboardingPayload {
+  fullName?: string;
+  dateOfBirth: string;
+  genderConfirmed: ConfirmedGender;
+  bloodGroup: string;
+  genotype: string;
+  allergies: string[];
+  chronicConditions: string[];
+  currentMedications: string[];
+  countryCode: string;
+  emergencyNumber: string;
+  city?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
+  healthNeedPreferences?: Partial<HealthNeedPreferences>;
+}
+
+export interface CriticalWearableAlert {
+  reading: WearableReading;
+  reasons: string[];
+  triggeredAt: string;
+}
 
 interface SessionUserSummary {
   uid: string | null;
@@ -158,7 +191,16 @@ interface AppContextValue {
   googleSignInPending: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (name: string, email: string, password: string, city: string) => Promise<void>;
+  signUpWithEmail: (
+    name: string,
+    email: string,
+    password: string,
+    city: string,
+    onboarding?: HealthOnboardingPayload
+  ) => Promise<void>;
+  needsOnboardingPrompt: boolean;
+  dismissOnboardingPrompt: () => void;
+  completeHealthOnboarding: (payload: HealthOnboardingPayload) => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   resendVerificationEmail: () => Promise<void>;
   refreshVerificationStatus: () => Promise<boolean>;
@@ -207,6 +249,11 @@ interface AppContextValue {
   addBpReading: (reading: Omit<BloodPressureReading, 'id'>) => Promise<void>;
   glucoseReadings: GlucoseReading[];
   addGlucoseReading: (reading: Omit<GlucoseReading, 'id'>) => Promise<void>;
+  wearableReadings: WearableReading[];
+  addWearableReading: (reading: Omit<WearableReading, 'id' | 'ownerUid'>) => Promise<WearableReading>;
+  criticalWearableAlert: CriticalWearableAlert | null;
+  triggerCriticalWearableAlert: (reading: WearableReading, reasons: string[]) => void;
+  clearCriticalWearableAlert: () => void;
   prescriptions: Prescription[];
   labResults: LabResult[];
   documents: MedicalDocument[];
@@ -469,6 +516,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserAccount | null>(null);
   const [privateInfo, setPrivateInfo] = useState<UserPrivateInfo | null>(null);
   const pendingCityRef = useRef<string>('Ibadan');
+  const pendingOnboardingRef = useRef<HealthOnboardingPayload | null>(null);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [wearableReadings, setWearableReadings] = useState<WearableReading[]>([
+    {
+      id: 'wear-demo-1',
+      profileId: INITIAL_FAMILY_PROFILES[0].id,
+      recordedAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
+      source: 'simulator',
+      deviceName: 'HealthConnect Watch Simulator',
+      heartRateBpm: 74,
+      spo2Percent: 98,
+      systolic: 120,
+      diastolic: 78,
+      temperatureC: 36.7,
+      steps: 6240,
+      sleepHours: 7.4,
+      criticalAlertTriggered: false,
+    },
+  ]);
+  const [criticalWearableAlert, setCriticalWearableAlert] =
+    useState<CriticalWearableAlert | null>(null);
   const loginFailureTrackerRef = useRef<{ count: number; lockedUntil: number }>({
     count: 0,
     lockedUntil: 0,
@@ -793,6 +861,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         onRehabSessions: setRehabSessions,
         onCycleLogs: setCycleLogs,
         onVaccinationRecords: setVaccinationRecords,
+        onWearableReadings: setWearableReadings,
         onAppointments: setAppointments,
         onTransactions: setTransactions,
         onContacts: setEmergencyContacts,
@@ -1013,7 +1082,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signUpWithEmail = async (name: string, email: string, password: string, city: string) => {
+  const signUpWithEmail = async (
+    name: string,
+    email: string,
+    password: string,
+    city: string,
+    onboarding?: HealthOnboardingPayload
+  ) => {
     setAuthError(null);
     // Enforce strong password policy (min 8 chars, upper, lower, digit)
     if (
@@ -1028,6 +1103,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     pendingCityRef.current = city || 'Ibadan';
+    if (onboarding) {
+      pendingOnboardingRef.current = onboarding;
+      try {
+        window.sessionStorage.setItem('hc_pending_onboarding_v1', JSON.stringify(onboarding));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
       if (name.trim()) {
@@ -2556,6 +2639,200 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await deleteVaccinationRecordDoc(recordId);
   };
 
+  const addWearableReading = async (
+    reading: Omit<WearableReading, 'id' | 'ownerUid'>
+  ): Promise<WearableReading> => {
+    const profileId = reading.profileId || activeProfileId || familyProfiles[0]?.id || 'default';
+    const localReading: WearableReading = {
+      ...reading,
+      id: `wear-${Date.now()}`,
+      profileId,
+      ownerUid: firebaseUser?.uid,
+      recordedAt: reading.recordedAt || new Date().toISOString(),
+    };
+    if (!firebaseUser || !firebaseUser.emailVerified) {
+      setWearableReadings((prev) => [localReading, ...prev].slice(0, 60));
+      return localReading;
+    }
+    const saved = await createWearableReadingDoc(firebaseUser.uid, {
+      ...reading,
+      profileId,
+      recordedAt: localReading.recordedAt,
+    });
+    return saved;
+  };
+
+  const triggerCriticalWearableAlert = (reading: WearableReading, reasons: string[]) => {
+    setCriticalWearableAlert({
+      reading,
+      reasons,
+      triggeredAt: new Date().toISOString(),
+    });
+  };
+
+  const clearCriticalWearableAlert = () => {
+    setCriticalWearableAlert(null);
+  };
+
+  const completeHealthOnboarding = async (payload: HealthOnboardingPayload) => {
+    const computedAge = calculateAgeFromDob(payload.dateOfBirth) ?? 25;
+    const isGuardianManaged = computedAge < 13;
+    const genderLabel =
+      payload.genderConfirmed === 'female'
+        ? 'Female'
+        : payload.genderConfirmed === 'male'
+          ? 'Male'
+          : 'Not specified';
+    const basePrefs = deriveDefaultPreferences(
+      resolveAgeStage(computedAge).stage,
+      payload.genderConfirmed
+    );
+    const mergedPrefs: HealthNeedPreferences = {
+      ...basePrefs,
+      ...(payload.healthNeedPreferences || {}),
+      // Strict child protection override regardless of user input
+      ...(isGuardianManaged
+        ? {
+            includeFemaleHealth: false,
+            includeMaleHealth: false,
+          }
+        : {}),
+    };
+
+    const profileUpdates: Partial<Omit<FamilyProfile, 'id' | 'ownerUid' | 'demoMemberId'>> = {
+      fullName: payload.fullName?.trim() || undefined,
+      age: computedAge,
+      dateOfBirth: payload.dateOfBirth,
+      gender: genderLabel,
+      genderConfirmed: payload.genderConfirmed,
+      bloodGroup: payload.bloodGroup || 'Unknown',
+      genotype: payload.genotype || 'Unknown',
+      allergies: payload.allergies.length > 0 ? payload.allergies : ['None recorded'],
+      chronicConditions: payload.chronicConditions,
+      currentMedications: payload.currentMedications,
+      countryCode: payload.countryCode || 'NG',
+      emergencyNumber: payload.emergencyNumber || '112',
+      city: payload.city?.trim() || undefined,
+      isGuardianManaged,
+      onboardingCompleted: true,
+      healthNeedPreferences: mergedPrefs,
+    };
+
+    const primaryProfile =
+      familyProfiles.find((p) => p.relationship === 'Self (Primary)') || familyProfiles[0] || null;
+
+    if (!firebaseUser) {
+      if (primaryProfile) {
+        setFamilyProfiles((prev) =>
+          prev.map((p) => (p.id === primaryProfile.id ? { ...p, ...profileUpdates } : p))
+        );
+      }
+      if (payload.emergencyContactName?.trim() && payload.emergencyContactPhone?.trim()) {
+        await addEmergencyContact({
+          name: payload.emergencyContactName.trim(),
+          phone: payload.emergencyContactPhone.trim(),
+          relationship: payload.emergencyContactRelation?.trim() || 'Emergency Contact',
+          city: payload.city?.trim() || primaryProfile?.city || 'Ibadan',
+          isPrimary: true,
+        });
+      }
+      setOnboardingDismissed(true);
+      return;
+    }
+
+    if (firebaseUser.emailVerified) {
+      if (primaryProfile) {
+        await updateFamilyProfile(primaryProfile.id, profileUpdates);
+      } else {
+        const created = await createFamilyProfileDoc(firebaseUser.uid, {
+          fullName: payload.fullName?.trim() || userProfile?.displayName || 'HealthConnect Member',
+          relationship: 'Self (Primary)',
+          age: computedAge,
+          dateOfBirth: payload.dateOfBirth,
+          gender: genderLabel,
+          genderConfirmed: payload.genderConfirmed,
+          city: payload.city?.trim() || userProfile?.city || 'Ibadan',
+          bloodGroup: payload.bloodGroup || 'Unknown',
+          genotype: payload.genotype || 'Unknown',
+          allergies: payload.allergies.length > 0 ? payload.allergies : ['None recorded'],
+          chronicConditions: payload.chronicConditions,
+          currentMedications: payload.currentMedications,
+          countryCode: payload.countryCode || 'NG',
+          emergencyNumber: payload.emergencyNumber || '112',
+          isGuardianManaged,
+          onboardingCompleted: true,
+          healthNeedPreferences: mergedPrefs,
+          hmoProvider: 'HealthConnect Care',
+        });
+        setActiveProfileId(created.id);
+      }
+
+      if (payload.emergencyContactName?.trim() && payload.emergencyContactPhone?.trim()) {
+        await addEmergencyContact({
+          name: payload.emergencyContactName.trim(),
+          phone: payload.emergencyContactPhone.trim(),
+          relationship: payload.emergencyContactRelation?.trim() || 'Emergency Contact',
+          city: payload.city?.trim() || userProfile?.city || 'Ibadan',
+          isPrimary: emergencyContacts.length === 0,
+        });
+      }
+    } else {
+      // Unverified email user: apply immediately to local workspace & keep pending until verified
+      pendingOnboardingRef.current = payload;
+      try {
+        window.sessionStorage.setItem('hc_pending_onboarding_v1', JSON.stringify(payload));
+      } catch {
+        // Ignore storage quota errors
+      }
+      if (primaryProfile) {
+        setFamilyProfiles((prev) =>
+          prev.map((p) => (p.id === primaryProfile.id ? { ...p, ...profileUpdates } : p))
+        );
+      }
+    }
+    setOnboardingDismissed(true);
+  };
+
+  // Auto-apply pending pre-account onboarding payload once signed in & verified
+  useEffect(() => {
+    if (!firebaseUser || !firebaseUser.emailVerified) return;
+    let pending = pendingOnboardingRef.current;
+    if (!pending && typeof window !== 'undefined') {
+      try {
+        const raw = window.sessionStorage.getItem('hc_pending_onboarding_v1');
+        if (raw) pending = JSON.parse(raw) as HealthOnboardingPayload;
+      } catch {
+        pending = null;
+      }
+    }
+    if (!pending || familyProfiles.length === 0) return;
+
+    pendingOnboardingRef.current = null;
+    try {
+      window.sessionStorage.removeItem('hc_pending_onboarding_v1');
+    } catch {
+      // Ignore
+    }
+    void completeHealthOnboarding(pending).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, emailVerifiedFlag, familyProfiles.length]);
+
+  const primaryProfileForOnboarding =
+    familyProfiles.find((p) => p.relationship === 'Self (Primary)') || familyProfiles[0] || null;
+
+  const needsOnboardingPrompt = Boolean(
+    firebaseUser &&
+      firebaseUser.emailVerified &&
+      !onboardingDismissed &&
+      primaryProfileForOnboarding &&
+      !primaryProfileForOnboarding.onboardingCompleted &&
+      (!primaryProfileForOnboarding.dateOfBirth ||
+        !primaryProfileForOnboarding.genderConfirmed ||
+        primaryProfileForOnboarding.bloodGroup === 'Unknown')
+  );
+
+  const dismissOnboardingPrompt = () => setOnboardingDismissed(true);
+
   const userSummary: SessionUserSummary = firebaseUser
     ? {
         uid: firebaseUser.uid,
@@ -2599,6 +2876,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         signInWithGoogle,
         signInWithEmail,
         signUpWithEmail,
+        needsOnboardingPrompt,
+        dismissOnboardingPrompt,
+        completeHealthOnboarding,
         resetPassword,
         resendVerificationEmail,
         refreshVerificationStatus,
@@ -2618,6 +2898,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addBpReading,
         glucoseReadings,
         addGlucoseReading,
+        wearableReadings,
+        addWearableReading,
+        criticalWearableAlert,
+        triggerCriticalWearableAlert,
+        clearCriticalWearableAlert,
         prescriptions,
         labResults,
         documents,

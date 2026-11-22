@@ -3,10 +3,12 @@ import {
   type HealthGuideCategory,
   type OfflineHealthGuide,
 } from '../data/offlineHealthLibrary';
+import { scanTextForMedicalRedFlags } from '../../shared/medicalRedFlags';
 
 export interface UrgentRedFlagAssessment {
   isUrgent: boolean;
   matchedSignals: string[];
+  matchedKeywords?: string[];
   headline: string;
   immediateGuidance: string;
 }
@@ -15,41 +17,6 @@ export interface LocalLibraryMatch {
   guide: OfflineHealthGuide;
   score: number;
 }
-
-const RED_FLAG_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  {
-    label: 'Severe chest pain or pressure',
-    pattern: /\b(chest pain|crushing chest|chest tightness|heart attack|pain radiating to (left )?arm)\b/i,
-  },
-  {
-    label: 'Severe difficulty breathing',
-    pattern: /\b(can'?t breathe|cannot breathe|gasping for air|severe shortness of breath|choking|blue lips|turning blue)\b/i,
-  },
-  {
-    label: 'Possible stroke warning signs',
-    pattern: /\b(face droop|slurred speech|sudden weakness on one side|cannot lift (my |one )?arm|sudden paralysis|having a stroke)\b/i,
-  },
-  {
-    label: 'Uncontrolled bleeding or unconsciousness',
-    pattern: /\b(heavy bleeding|won'?t stop bleeding|uncontrolled bleeding|unconscious|passed out|not breathing|unresponsive)\b/i,
-  },
-  {
-    label: 'Seizure or convulsions',
-    pattern: /\b(seizure|convulsion|convulsing|fitting)\b/i,
-  },
-  {
-    label: 'Urgent pregnancy danger sign',
-    pattern: /\b(bleeding (while|during) pregnan|pregnant.*(severe headache|blurred vision|bleeding)|baby (stopped|not) moving|eclampsia)\b/i,
-  },
-  {
-    label: 'Severe allergic swelling (anaphylaxis)',
-    pattern: /\b(throat swelling|tongue swelling|swollen throat|anaphylaxis)\b/i,
-  },
-  {
-    label: 'Self-harm or mental health crisis',
-    pattern: /\b(suicide|kill myself|end my life|self[- ]harm|want to die)\b/i,
-  },
-];
 
 const CLINICAL_SYNONYMS: Record<string, string[]> = {
   bp: ['blood', 'pressure', 'hypertension', 'systolic', 'diastolic'],
@@ -99,30 +66,26 @@ const STOP_WORDS = new Set([
 ]);
 
 /**
- * Deterministic, zero-latency (<1ms) local clinical red-flag screen.
- * Ensures users describing life-threatening symptoms NEVER wait on network or AI latency.
+ * Deterministic, zero-latency (<1ms) local clinical red-flag screen backed by
+ * the shared medicalRedFlags scanner.
  */
 export function detectUrgentRedFlags(input: string): UrgentRedFlagAssessment {
-  const matchedSignals: string[] = [];
-  for (const rule of RED_FLAG_PATTERNS) {
-    if (rule.pattern.test(input)) {
-      matchedSignals.push(rule.label);
-    }
-  }
-  if (matchedSignals.length === 0) {
+  const scan = scanTextForMedicalRedFlags(input);
+  if (!scan.detected) {
     return {
       isUrgent: false,
       matchedSignals: [],
+      matchedKeywords: [],
       headline: '',
       immediateGuidance: '',
     };
   }
   return {
     isUrgent: true,
-    matchedSignals,
-    headline: 'Urgent Medical Warning Signs Detected',
-    immediateGuidance:
-      'Do NOT wait for an AI response. Call Nigeria Emergency 112 immediately or go straight to the nearest emergency hospital (such as UCH Ibadan A&E, Ring Road State Hospital, Adeoyo Maternity, or Bowen Ogbomoso). You can also open the HealthConnect Oyo Emergency Centre for hospital routing.',
+    matchedSignals: scan.matchedCategories,
+    matchedKeywords: scan.matchedKeywords,
+    headline: scan.headline,
+    immediateGuidance: scan.immediateGuidance,
   };
 }
 
