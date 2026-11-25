@@ -19,7 +19,6 @@ import {
   verifyInterswitchTransaction,
 } from '../services/apiClient';
 import { HealthWallet, WalletBannerCard } from '../components/wallet/HealthWallet';
-import { AdminPaymentsPanel } from '../components/payments/AdminPaymentsPanel';
 import type { TransactionRecord } from '../types/healthcare';
 
 type PaymentStatusFilter = 'all' | 'success' | 'pending';
@@ -506,9 +505,6 @@ export function PaymentsPage() {
         {/* Refund Credit Wallet Banner (if user has wallet history/balance) */}
         <WalletBannerCard onViewWallet={() => setShowWalletLedger((prev) => !prev)} />
         {showWalletLedger && <HealthWallet />}
-
-        {/* Administrator-Only Payment Gateway Management Dashboard */}
-        {user.signedIn && user.role === 'administrator' && <AdminPaymentsPanel />}
       </div>
     </div>
   );

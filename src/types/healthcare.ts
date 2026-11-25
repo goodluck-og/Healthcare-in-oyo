@@ -55,6 +55,34 @@ export interface AuditLogEntry {
   createdAt?: string;
 }
 
+export interface ChatModerationEvent {
+  id: string;
+  actorUid: string;
+  flagType: 'pii_masked' | 'medical_red_flag' | 'bot_policy_warning';
+  detectedCategories: string[];
+  mode: string;
+  maskedExcerpt: string;
+  botAction?: string;
+  serviceName?: string;
+  createdAt: string;
+}
+
+export interface PlatformService {
+  id: string;
+  name: string;
+  category: 'Care Team' | 'Clinical Service' | 'Emergency Desk' | 'Community Support';
+  description: string;
+  leadSpecialty: string;
+  city: string;
+  turnaroundLabel: string;
+  botModerationEnabled: boolean;
+  botAutoMaskPii: boolean;
+  botAutoEscalateRedFlags: boolean;
+  active: boolean;
+  addedByUid?: string;
+  createdAt?: string;
+}
+
 export interface IntegrationStatus {
   geminiConfigured: boolean;
   openrouterConfigured: boolean;
@@ -65,6 +93,7 @@ export interface IntegrationStatus {
   interswitchMissingCount?: number;
   interswitchUsingPublicSandboxDefaults?: boolean;
   smsConfigured: boolean;
+  twilioConfigured?: boolean;
   firebaseProjectId: string;
 }
 
@@ -92,6 +121,10 @@ export interface Doctor {
   bio: string;
   avatarVariant: 'adewale' | 'chioma' | 'ibrahim' | 'ngozi' | 'tunde' | 'amina';
   coordinates: Coordinates;
+  hospitalOwnerUid?: string;
+  hospitalId?: string;
+  doctorUid?: string;
+  addedByUid?: string;
 }
 
 export interface Facility {
@@ -152,6 +185,7 @@ export interface Appointment {
   doctorUid?: string;
   hospitalUid?: string;
   profileId: string;
+  patientName?: string;
   doctorId: string;
   doctorName: string;
   specialty: string;
@@ -159,6 +193,8 @@ export interface Appointment {
   city: string;
   date: string;
   time: string;
+  startTime?: string;
+  endTime?: string;
   mode: 'In-Person' | 'Video Telehealth';
   status: 'Confirmed' | 'Pending Payment' | 'Completed' | 'Rescheduled' | 'Cancelled';
   feeNgn: number;

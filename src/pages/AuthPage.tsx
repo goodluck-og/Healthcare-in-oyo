@@ -21,6 +21,10 @@ import {
   GLOBAL_EMERGENCY_PRESETS,
   resolveAgeStage,
 } from '../services/personalisationEngine';
+import {
+  ADMIN_GMAIL_ACCOUNT,
+  DEMO_SANDBOX_ACCOUNTS,
+} from '../data/demoAccounts';
 import type { AppRoute, ConfirmedGender } from '../types/healthcare';
 
 const BLOOD_GROUPS = ['Unknown', 'O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
@@ -42,6 +46,7 @@ export function AuthPage({
 }) {
   const {
     signInWithGoogle,
+    signInAsDemoAccount,
     googleSignInPending,
     signInWithEmail,
     signUpWithEmail,
@@ -105,16 +110,48 @@ export function AuthPage({
     if (preset) setEmergencyNumber(preset.emergencyNumber);
   };
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (loginHintEmail?: string, onboarding?: HealthOnboardingPayload) => {
     clearAuthError();
     clearAuthNotice();
     setLocalError(null);
     setSubmitting(true);
     try {
-      await signInWithGoogle();
+      await signInWithGoogle(loginHintEmail, onboarding);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const buildOnboardingPayload = (): HealthOnboardingPayload => ({
+    fullName: fullName.trim() || 'HealthConnect Member',
+    dateOfBirth,
+    genderConfirmed,
+    bloodGroup,
+    genotype,
+    allergies: parseCsv(allergiesText),
+    chronicConditions: parseCsv(conditionsText),
+    currentMedications: parseCsv(medicationsText),
+    countryCode,
+    emergencyNumber: emergencyNumber.trim() || '112',
+    city,
+    emergencyContactName: iceName.trim() || undefined,
+    emergencyContactPhone: icePhone.trim() || undefined,
+    emergencyContactRelation: 'Emergency Contact',
+  });
+
+  const handleGoogleRegisterStep2 = async () => {
+    clearAuthError();
+    clearAuthNotice();
+    setLocalError(null);
+    if (!dateOfBirth) {
+      setLocalError('Please enter your Date of Birth so HealthConnect can tailor safe age-appropriate tools.');
+      return;
+    }
+    if (genderConfirmed === 'not_specified') {
+      setLocalError('Please confirm Male or Female before creating your account.');
+      return;
+    }
+    await handleGoogleSignIn(email.trim() || undefined, buildOnboardingPayload());
   };
 
   const handleAdvanceToStep2 = (e: React.FormEvent) => {
@@ -165,22 +202,7 @@ export function AuthPage({
       if (forgotMode) {
         await resetPassword(email);
       } else if (mode === 'register') {
-        const onboarding: HealthOnboardingPayload = {
-          fullName: fullName.trim() || 'HealthConnect Member',
-          dateOfBirth,
-          genderConfirmed,
-          bloodGroup,
-          genotype,
-          allergies: parseCsv(allergiesText),
-          chronicConditions: parseCsv(conditionsText),
-          currentMedications: parseCsv(medicationsText),
-          countryCode,
-          emergencyNumber: emergencyNumber.trim() || '112',
-          city,
-          emergencyContactName: iceName.trim() || undefined,
-          emergencyContactPhone: icePhone.trim() || undefined,
-          emergencyContactRelation: 'Emergency Contact',
-        };
+        const onboarding = buildOnboardingPayload();
         await signUpWithEmail(
           fullName.trim() || 'HealthConnect Member',
           email,
@@ -280,16 +302,34 @@ export function AuthPage({
             )}
 
             {displayedError && (
-              <div className="rounded-xl bg-[#E5484D]/18 border border-[#E5484D]/45 p-3.5 flex items-start gap-2.5 text-xs text-[#FFD6D8]">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#FF8A8E]" />
-                <p className="leading-relaxed">{displayedError}</p>
+              <div className="rounded-xl bg-[#E5484D]/18 border border-[#E5484D]/45 p-3.5 space-y-2.5 text-xs text-[#FFD6D8]">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#FF8A8E]" />
+                  <p className="leading-relaxed">{displayedError}</p>
+                </div>
+                {displayedError.includes('Email/Password sign-in is not enabled') && (
+                  <div className="pl-6 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={submitting || googleSignInPending}
+                      onClick={() =>
+                        void (mode === 'register' && registerStep === 2
+                          ? handleGoogleRegisterStep2()
+                          : handleGoogleSignIn(email.trim() || undefined))
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-[#E8702A] hover:bg-[#CF5E1D] text-white text-[11px] font-semibold transition-colors cursor-pointer"
+                    >
+                      Continue with Google Instead
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* One-Click Google Sign-In (shown on Login & Register Step 1) */}
             {(mode === 'login' || registerStep === 1) && !forgotMode && (
               <>
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <button
                     type="button"
                     disabled={submitting || googleSignInPending}
@@ -320,15 +360,28 @@ export function AuthPage({
                         : 'Continue with Google'}
                     </span>
                   </button>
+
+                  {mode === 'login' && (
+                    <button
+                      type="button"
+                      disabled={submitting || googleSignInPending}
+                      onClick={() => void handleGoogleSignIn(ADMIN_GMAIL_ACCOUNT)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-3 min-h-[42px] rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 disabled:opacity-60 text-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0" />
+                      <span>Admin Sign-In (Google · {ADMIN_GMAIL_ACCOUNT})</span>
+                    </button>
+                  )}
+
                   <p className="text-[11px] text-[#A6A8D6] text-center">
-                    Secure Google sign-in — new accounts confirm DOB, gender &amp; blood group right after entering.
+                    Verified Google sign-in unlocks live Firestore persistence &amp; Admin Governance.
                   </p>
                 </div>
 
                 <div className="relative flex items-center py-1">
                   <div className="flex-grow border-t border-white/12" />
                   <span className="shrink-0 mx-3 text-[11px] text-[#8686AC] font-medium">
-                    OR EMAIL &amp; PASSWORD
+                    {mode === 'login' ? 'OR DEMO / EMAIL SIGN-IN' : 'OR SET UP HEALTH PROFILE FIRST'}
                   </span>
                   <div className="flex-grow border-t border-white/12" />
                 </div>
@@ -648,21 +701,33 @@ export function AuthPage({
                     onChange={(e) => setMedicationsText(e.target.value)}
                   />
 
-                  <div className="flex items-center gap-2.5 pt-1">
+                  <div className="space-y-2.5 pt-1">
                     <button
                       type="button"
-                      onClick={() => setRegisterStep(1)}
-                      className="px-4 py-3 min-h-[46px] rounded-xl bg-white/8 hover:bg-white/15 text-xs font-semibold text-[#D7D8EE] cursor-pointer"
+                      disabled={submitting || googleSignInPending}
+                      onClick={() => void handleGoogleRegisterStep2()}
+                      className="w-full py-3 min-h-[46px] rounded-xl bg-[#E8702A] hover:bg-[#CF5E1D] disabled:opacity-60 text-white text-sm font-bold transition-colors cursor-pointer"
                     >
-                      Back
+                      {submitting || googleSignInPending
+                        ? 'Signing in with Google...'
+                        : 'Continue with Google & Save Health Profile'}
                     </button>
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="flex-1 py-3 min-h-[46px] rounded-xl bg-[#E8702A] hover:bg-[#CF5E1D] disabled:opacity-60 text-white text-sm font-bold transition-colors cursor-pointer"
-                    >
-                      {submitting ? 'Creating Account...' : 'Create Account & Verify Email'}
-                    </button>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setRegisterStep(1)}
+                        className="px-4 py-2.5 min-h-[42px] rounded-xl bg-white/8 hover:bg-white/15 text-xs font-semibold text-[#D7D8EE] cursor-pointer"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="flex-1 py-2.5 min-h-[42px] rounded-xl bg-[#272757] hover:bg-[#353574] border border-white/15 disabled:opacity-60 text-white text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        {submitting ? 'Creating Account...' : 'Or Create with Email & Password'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -681,6 +746,47 @@ export function AuthPage({
                 </button>
               )}
             </form>
+
+            {/* Interactive Demo Sandbox Accounts (Isolated — Zero Real Firestore / Admin Access) */}
+            {mode === 'login' && !forgotMode && (
+              <div className="rounded-2xl bg-[#0B0A33] border border-white/12 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-white">
+                    Demo Sandbox Accounts (Instant Evaluation)
+                  </p>
+                  <span className="text-[10px] font-mono text-[#FFB585]">Isolated Sandbox</span>
+                </div>
+                <p className="text-[11px] text-[#A6A8D6] leading-snug">
+                  Enter any demo email &amp; password above or tap a card to test age safety, wearables, doctor, and hospital portals without touching live patient records.
+                </p>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {DEMO_SANDBOX_ACCOUNTS.map((acc) => (
+                    <div
+                      key={acc.id}
+                      className="rounded-xl bg-[#161554] border border-white/10 p-2.5 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-white truncate">{acc.label}</p>
+                        <p className="text-[10px] font-mono text-[#C7C8E6] truncate">
+                          {acc.email} · {acc.password}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmail(acc.email);
+                          setPassword(acc.password);
+                          signInAsDemoAccount(acc.id);
+                        }}
+                        className="shrink-0 px-2.5 py-1.5 rounded-lg bg-[#E8702A] hover:bg-[#CF5E1D] text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        Log In
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-white/10 text-center text-xs text-[#B8BADB] space-y-2.5">

@@ -11,23 +11,31 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// CRITICAL: Must pass firestoreDatabaseId as the database target for the provisioned Enterprise Firestore database.
+const configuredDatabaseId = (
+  firebaseConfig as { firestoreDatabaseId?: string }
+).firestoreDatabaseId;
+
+// Pass firestoreDatabaseId when configured for a named Firestore database, otherwise use default.
 // Auto-detect long-polling so fast WebChannel streaming is used by default while automatically falling back
 // behind strict proxies or embedded iframes without forcing slow XHR polling that can time out.
 function createFirestoreInstance(): Firestore {
   if (typeof window === 'undefined') {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return configuredDatabaseId
+      ? getFirestore(app, configuredDatabaseId)
+      : getFirestore(app);
   }
   try {
-    return initializeFirestore(
-      app,
-      {
-        experimentalAutoDetectLongPolling: true,
-      },
-      firebaseConfig.firestoreDatabaseId
-    );
+    return configuredDatabaseId
+      ? initializeFirestore(
+          app,
+          { experimentalAutoDetectLongPolling: true },
+          configuredDatabaseId
+        )
+      : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
   } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return configuredDatabaseId
+      ? getFirestore(app, configuredDatabaseId)
+      : getFirestore(app);
   }
 }
 
@@ -37,7 +45,7 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
-export const FIREBASE_DATABASE_ID = firebaseConfig.firestoreDatabaseId;
+export const FIREBASE_DATABASE_ID = configuredDatabaseId || '(default)';
 
 export function isFirestoreOfflineError(error: unknown): boolean {
   const code = (error as { code?: string })?.code || '';

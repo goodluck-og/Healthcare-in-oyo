@@ -12,7 +12,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import { DEMO_DOCTORS, DEMO_FACILITIES, NIGERIA_CITY_PRESETS } from '../data/mockNigeriaData';
+import { NIGERIA_CITY_PRESETS } from '../data/mockNigeriaData';
 import { useApp } from '../context/AppContext';
 import { DoctorAvatarArtwork } from '../components/ui/VisualArtwork';
 import { LocationModal } from '../components/modals/LocationModal';
@@ -32,6 +32,9 @@ export function FindHealthcarePage() {
     activeSubscription,
     openSubscriptionCheckout,
     bookOnlineConsultation,
+    allFacilities,
+    allDoctors,
+    allPlatformServices,
     navigate,
   } = useApp();
 
@@ -39,12 +42,16 @@ export function FindHealthcarePage() {
   const [city, setCity] = useState('All Cities');
   const [category, setCategory] = useState<CategoryTab>('All');
   const [locationOpen, setLocationOpen] = useState(false);
-  const [selectedRouteTargetId, setSelectedRouteTargetId] = useState<string>(DEMO_FACILITIES[0].id);
+  const [selectedRouteTargetId, setSelectedRouteTargetId] = useState<string>(
+    allFacilities[0]?.id || ''
+  );
 
-  // Inline Online Consultation Booking state
+  // Inline Consultation & Physical Appointment Booking state
   const [bookingDoctor, setBookingDoctor] = useState<Doctor | null>(null);
+  const [bookingMode, setBookingMode] = useState<'Video Telehealth' | 'In-Person'>('Video Telehealth');
   const [slotDate, setSlotDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [slotTime, setSlotTime] = useState('11:00 WAT');
+  const [slotStartTime, setSlotStartTime] = useState('10:00');
+  const [slotEndTime, setSlotEndTime] = useState('10:45');
   const [consultReason, setConsultReason] = useState('');
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingFeedback, setBookingFeedback] = useState<{
@@ -52,6 +59,7 @@ export function FindHealthcarePage() {
     reference: string;
     date: string;
     time: string;
+    mode: 'Video Telehealth' | 'In-Person';
   } | null>(null);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
@@ -60,7 +68,7 @@ export function FindHealthcarePage() {
   const doctors = useMemo(() => {
     if (category !== 'All' && category !== 'Doctors') return [];
     const q = query.trim().toLowerCase();
-    return DEMO_DOCTORS.filter((d) => {
+    return allDoctors.filter((d) => {
       const cityOk = city === 'All Cities' || d.city === city;
       const qOk =
         !q ||
@@ -69,26 +77,28 @@ export function FindHealthcarePage() {
         d.hospital.toLowerCase().includes(q);
       return cityOk && qOk;
     });
-  }, [category, city, query]);
+  }, [allDoctors, category, city, query]);
 
   const facilities = useMemo(() => {
     if (category === 'Doctors') return [];
     const q = query.trim().toLowerCase();
-    const list = DEMO_FACILITIES.filter((f) => {
-      const catOk = category === 'All' || f.type === category;
-      const cityOk = city === 'All Cities' || f.city === city;
-      const qOk =
-        !q ||
-        f.name.toLowerCase().includes(q) ||
-        f.address.toLowerCase().includes(q) ||
-        f.specialties.some((s) => s.toLowerCase().includes(q));
-      return catOk && cityOk && qOk;
-    }).map((f) => ({
-      ...f,
-      distanceKm: userLocation.coordinates
-        ? computeDistanceKm(userLocation.coordinates, f.coordinates)
-        : null,
-    }));
+    const list = allFacilities
+      .filter((f) => {
+        const catOk = category === 'All' || f.type === category;
+        const cityOk = city === 'All Cities' || f.city === city;
+        const qOk =
+          !q ||
+          f.name.toLowerCase().includes(q) ||
+          f.address.toLowerCase().includes(q) ||
+          f.specialties.some((s) => s.toLowerCase().includes(q));
+        return catOk && cityOk && qOk;
+      })
+      .map((f) => ({
+        ...f,
+        distanceKm: userLocation.coordinates
+          ? computeDistanceKm(userLocation.coordinates, f.coordinates)
+          : null,
+      }));
 
     return list.sort((a, b) => {
       if (a.distanceKm !== null && b.distanceKm !== null) {
@@ -96,7 +106,7 @@ export function FindHealthcarePage() {
       }
       return 0;
     });
-  }, [category, city, query, userLocation.coordinates]);
+  }, [allFacilities, category, city, query, userLocation.coordinates]);
 
   const routeTarget =
     facilities.find((f) => f.id === selectedRouteTargetId) || facilities[0] || null;
@@ -105,16 +115,24 @@ export function FindHealthcarePage() {
     e.preventDefault();
     if (!bookingDoctor) return;
     setBookingError(null);
+    if (slotEndTime <= slotStartTime) {
+      setBookingError('End time ("To") must be after start time ("From").');
+      return;
+    }
     setBookingBusy(true);
     try {
       const created = await bookOnlineConsultation({
         doctorId: bookingDoctor.id,
+        ...(bookingDoctor.doctorUid ? { doctorUid: bookingDoctor.doctorUid } : {}),
         doctorName: bookingDoctor.name,
         specialty: bookingDoctor.specialty,
         facilityName: bookingDoctor.hospital,
         city: bookingDoctor.city,
         date: slotDate,
-        time: slotTime,
+        time: `${slotStartTime} - ${slotEndTime} WAT`,
+        startTime: slotStartTime,
+        endTime: slotEndTime,
+        mode: bookingMode,
         reason: consultReason,
       });
       setBookingFeedback({
@@ -122,12 +140,13 @@ export function FindHealthcarePage() {
         reference: created.reference,
         date: created.date,
         time: created.time,
+        mode: created.mode,
       });
       setBookingDoctor(null);
       setConsultReason('');
     } catch (err) {
       setBookingError(
-        err instanceof Error ? err.message : 'Unable to book online doctor consultation.'
+        err instanceof Error ? err.message : 'Unable to book doctor appointment.'
       );
     } finally {
       setBookingBusy(false);
@@ -183,6 +202,59 @@ export function FindHealthcarePage() {
             {activeSubscription.status === 'Active' ? 'Manage Plan' : 'Subscribe (₦16k / ₦50k)'}
           </button>
         </div>
+
+        {/* Active Care Teams & Platform Services (Sentinel Bot Monitored) */}
+        {allPlatformServices.filter((s) => s.active).length > 0 && (
+          <section className="rounded-2xl bg-white border border-[#272757]/10 p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-[#0F0E47]">
+                  Verified Care Teams &amp; Platform Services
+                </h2>
+                <p className="text-xs text-[#505081]">
+                  Managed by platform administrators and automatically safeguarded by HealthConnect Sentinel Bot.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/ai-assistant')}
+                className="text-xs font-semibold text-[#272757] hover:text-[#E8702A] cursor-pointer self-start sm:self-auto"
+              >
+                Chat with AI + Sentinel Bot →
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {allPlatformServices
+                .filter((s) => s.active)
+                .map((svc) => (
+                  <div
+                    key={svc.id}
+                    className="rounded-xl bg-[#F5F6FC] border border-[#272757]/10 p-4 space-y-1.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[#272757] uppercase text-[10px]">
+                        {svc.category}
+                      </span>
+                      <span
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                          svc.botModerationEnabled
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {svc.botModerationEnabled ? 'Sentinel Bot Active' : 'Bot Paused'}
+                      </span>
+                    </div>
+                    <p className="font-bold text-[#0F0E47] text-sm">{svc.name}</p>
+                    <p className="text-[#505081] leading-relaxed">{svc.description}</p>
+                    <p className="text-[11px] text-[#272757] pt-1 font-medium">
+                      {svc.leadSpecialty} · {svc.city} · {svc.turnaroundLabel}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
 
         {/* Confirmed online booking banner */}
         {bookingFeedback && (
@@ -361,35 +433,60 @@ export function FindHealthcarePage() {
             >
               <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-[#0F0E47] mb-1">
-                  Preferred Date
+                  Visit Type
+                </label>
+                <select
+                  value={bookingMode}
+                  onChange={(e) =>
+                    setBookingMode(e.target.value as 'Video Telehealth' | 'In-Person')
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-sm text-[#0F0E47]"
+                >
+                  <option value="Video Telehealth">Online Video Consultation</option>
+                  <option value="In-Person">Physical In-Person Exam</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-[#0F0E47] mb-1">
+                  Appointment Day
                 </label>
                 <input
                   type="date"
                   required
                   value={slotDate}
                   onChange={(e) => setSlotDate(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm text-[#0F0E47]"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm text-[#0F0E47] font-mono"
                 />
               </div>
 
               <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-[#0F0E47] mb-1">
-                  Video Slot (WAT)
+                  From Time (WAT)
                 </label>
-                <select
-                  value={slotTime}
-                  onChange={(e) => setSlotTime(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-sm text-[#0F0E47]"
-                >
-                  <option value="09:30 WAT">09:30 WAT</option>
-                  <option value="11:00 WAT">11:00 WAT</option>
-                  <option value="14:00 WAT">14:00 WAT</option>
-                  <option value="16:30 WAT">16:30 WAT</option>
-                  <option value="19:00 WAT">19:00 WAT</option>
-                </select>
+                <input
+                  type="time"
+                  required
+                  value={slotStartTime}
+                  onChange={(e) => setSlotStartTime(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm text-[#0F0E47] font-mono"
+                />
               </div>
 
-              <div className="md:col-span-6">
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-[#0F0E47] mb-1">
+                  To Time (WAT)
+                </label>
+                <input
+                  type="time"
+                  required
+                  value={slotEndTime}
+                  onChange={(e) => setSlotEndTime(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm text-[#0F0E47] font-mono"
+                />
+              </div>
+
+              <div className="md:col-span-12">
                 <label className="block text-xs font-semibold text-[#0F0E47] mb-1">
                   Symptoms or Discussion Topic (Optional)
                 </label>
@@ -397,14 +494,16 @@ export function FindHealthcarePage() {
                   type="text"
                   value={consultReason}
                   onChange={(e) => setConsultReason(e.target.value)}
-                  placeholder="e.g. Persistent headaches, BP review, or child fever check..."
+                  placeholder="e.g. Persistent headaches, BP review, or physical check-up..."
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-[#0F0E47]"
                 />
               </div>
 
               <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-3 pt-1">
                 <p className="text-xs text-[#505081]">
-                  After this video consultation, you and {bookingDoctor.name} can book an in-person physical examination at {bookingDoctor.hospital} whenever needed.
+                  {bookingMode === 'In-Person'
+                    ? `Blocks a physical appointment slot at ${bookingDoctor.hospital} on ${slotDate} (${slotStartTime} → ${slotEndTime}) in the doctor's physical calendar.`
+                    : `Books an online video consultation with ${bookingDoctor.name} (${slotStartTime} → ${slotEndTime}).`}
                 </p>
                 <div className="flex items-center gap-2.5">
                   <button
@@ -419,7 +518,11 @@ export function FindHealthcarePage() {
                     disabled={bookingBusy}
                     className="px-5 py-2.5 rounded-xl bg-[#272757] hover:bg-[#0F0E47] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
                   >
-                    {bookingBusy ? 'Confirming Slot...' : 'Confirm Online Consultation'}
+                    {bookingBusy
+                      ? 'Confirming Slot...'
+                      : bookingMode === 'In-Person'
+                        ? 'Block Physical Appointment'
+                        : 'Confirm Online Consultation'}
                   </button>
                 </div>
               </div>

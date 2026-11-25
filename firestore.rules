@@ -238,11 +238,12 @@ service cloud.firestore {
 
     function isValidAppointment(data) {
       return data.keys().hasAll(['patientUid', 'profileId', 'doctorId', 'doctorName', 'specialty', 'facilityName', 'city', 'date', 'time', 'mode', 'status', 'feeNgn', 'reference', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['patientUid', 'doctorUid', 'hospitalUid', 'profileId', 'doctorId', 'doctorName', 'specialty', 'facilityName', 'city', 'date', 'time', 'mode', 'status', 'feeNgn', 'reference', 'clinicalNotes', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['patientUid', 'doctorUid', 'hospitalUid', 'profileId', 'patientName', 'doctorId', 'doctorName', 'specialty', 'facilityName', 'city', 'date', 'time', 'startTime', 'endTime', 'mode', 'status', 'feeNgn', 'reference', 'clinicalNotes', 'createdAt', 'updatedAt']) &&
         isValidId(data.patientUid) &&
         (!('doctorUid' in data) || (data.doctorUid is string && data.doctorUid.size() <= 128)) &&
         (!('hospitalUid' in data) || (data.hospitalUid is string && data.hospitalUid.size() <= 128)) &&
         data.profileId is string && data.profileId.size() >= 1 && data.profileId.size() <= 128 &&
+        (!('patientName' in data) || (data.patientName is string && data.patientName.size() >= 1 && data.patientName.size() <= 120)) &&
         data.doctorId is string && data.doctorId.size() >= 1 && data.doctorId.size() <= 80 &&
         data.doctorName is string && data.doctorName.size() >= 2 && data.doctorName.size() <= 120 &&
         data.specialty is string && data.specialty.size() >= 2 && data.specialty.size() <= 100 &&
@@ -250,6 +251,8 @@ service cloud.firestore {
         data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
         data.date is string && data.date.size() >= 4 && data.date.size() <= 32 &&
         data.time is string && data.time.size() >= 2 && data.time.size() <= 32 &&
+        (!('startTime' in data) || (data.startTime is string && data.startTime.size() >= 4 && data.startTime.size() <= 16)) &&
+        (!('endTime' in data) || (data.endTime is string && data.endTime.size() >= 4 && data.endTime.size() <= 16)) &&
         data.mode in ['In-Person', 'Video Telehealth'] &&
         data.status in ['Confirmed', 'Pending Payment', 'Completed', 'Rescheduled', 'Cancelled'] &&
         data.feeNgn is number && data.feeNgn >= 0 && data.feeNgn <= 5000000 &&
@@ -374,6 +377,119 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidPartnerHospital(data) {
+      return data.keys().hasAll([
+          'name', 'type', 'city', 'state', 'address', 'accreditedBy',
+          'emergency24h', 'specialties', 'nhiaAccepted', 'phoneNote',
+          'lat', 'lng', 'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'type', 'city', 'state', 'address', 'accreditedBy',
+          'emergency24h', 'specialties', 'nhiaAccepted', 'phoneNote',
+          'lat', 'lng', 'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
+        data.type in ['Hospital', 'Clinic', 'Pharmacy', 'Laboratory'] &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.state is string && data.state.size() >= 2 && data.state.size() <= 60 &&
+        data.address is string && data.address.size() >= 4 && data.address.size() <= 200 &&
+        data.accreditedBy is string && data.accreditedBy.size() >= 2 && data.accreditedBy.size() <= 120 &&
+        data.emergency24h is bool &&
+        data.specialties is list && data.specialties.size() >= 1 && data.specialties.size() <= 12 &&
+        data.specialties[0] is string &&
+        data.nhiaAccepted is bool &&
+        data.phoneNote is string && data.phoneNote.size() >= 3 && data.phoneNote.size() <= 120 &&
+        data.lat is number && data.lat >= -90 && data.lat <= 90 &&
+        data.lng is number && data.lng >= -180 && data.lng <= 180 &&
+        isValidId(data.addedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidChatModerationEvent(data) {
+      return data.keys().hasAll([
+          'actorUid', 'flagType', 'detectedCategories', 'mode', 'maskedExcerpt', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'actorUid', 'flagType', 'detectedCategories', 'mode', 'maskedExcerpt',
+          'botAction', 'serviceName', 'createdAt'
+        ]) &&
+        isValidId(data.actorUid) &&
+        data.flagType in ['pii_masked', 'medical_red_flag', 'bot_policy_warning'] &&
+        data.detectedCategories is list &&
+        data.detectedCategories.size() >= 1 &&
+        data.detectedCategories.size() <= 6 &&
+        data.detectedCategories[0] is string &&
+        data.mode is string && data.mode.size() >= 2 && data.mode.size() <= 100 &&
+        data.maskedExcerpt is string && data.maskedExcerpt.size() >= 2 && data.maskedExcerpt.size() <= 280 &&
+        (!('botAction' in data) || (data.botAction is string && data.botAction.size() <= 80)) &&
+        (!('serviceName' in data) || (data.serviceName is string && data.serviceName.size() <= 120)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPartnerDoctor(data) {
+      return data.keys().hasAll([
+          'name', 'specialty', 'credentials', 'mdcnStatus', 'hospital', 'city', 'state',
+          'consultationFeeNgn', 'languages', 'nextAvailable', 'experienceYears',
+          'supportsTelehealth', 'bio', 'avatarVariant', 'lat', 'lng', 'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'specialty', 'credentials', 'mdcnStatus', 'hospital',
+          'hospitalId', 'hospitalOwnerUid', 'doctorUid',
+          'city', 'state', 'consultationFeeNgn', 'languages', 'nextAvailable', 'experienceYears',
+          'supportsTelehealth', 'bio', 'avatarVariant', 'lat', 'lng', 'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+        data.specialty is string && data.specialty.size() >= 2 && data.specialty.size() <= 100 &&
+        data.credentials is string && data.credentials.size() >= 2 && data.credentials.size() <= 120 &&
+        data.mdcnStatus is string && data.mdcnStatus.size() >= 2 && data.mdcnStatus.size() <= 80 &&
+        data.hospital is string && data.hospital.size() >= 2 && data.hospital.size() <= 140 &&
+        (!('hospitalId' in data) || (data.hospitalId is string && data.hospitalId.size() <= 128)) &&
+        (!('hospitalOwnerUid' in data) || isValidId(data.hospitalOwnerUid)) &&
+        (!('doctorUid' in data) || (data.doctorUid is string && data.doctorUid.size() <= 128)) &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.state is string && data.state.size() >= 2 && data.state.size() <= 60 &&
+        data.consultationFeeNgn is number && data.consultationFeeNgn >= 0 && data.consultationFeeNgn <= 500000 &&
+        data.languages is list && data.languages.size() >= 1 && data.languages.size() <= 8 &&
+        data.languages[0] is string &&
+        data.nextAvailable is string && data.nextAvailable.size() >= 2 && data.nextAvailable.size() <= 80 &&
+        data.experienceYears is number && data.experienceYears >= 0 && data.experienceYears <= 70 &&
+        data.supportsTelehealth is bool &&
+        data.bio is string && data.bio.size() >= 4 && data.bio.size() <= 400 &&
+        data.avatarVariant in ['adewale', 'chioma', 'ibrahim', 'ngozi', 'tunde', 'amina'] &&
+        data.lat is number && data.lat >= -90 && data.lat <= 90 &&
+        data.lng is number && data.lng >= -180 && data.lng <= 180 &&
+        isValidId(data.addedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPlatformService(data) {
+      return data.keys().hasAll([
+          'name', 'category', 'description', 'leadSpecialty', 'city', 'turnaroundLabel',
+          'botModerationEnabled', 'botAutoMaskPii', 'botAutoEscalateRedFlags', 'active',
+          'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'category', 'description', 'leadSpecialty', 'city', 'turnaroundLabel',
+          'botModerationEnabled', 'botAutoMaskPii', 'botAutoEscalateRedFlags', 'active',
+          'addedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+        data.category in ['Care Team', 'Clinical Service', 'Emergency Desk', 'Community Support'] &&
+        data.description is string && data.description.size() >= 4 && data.description.size() <= 360 &&
+        data.leadSpecialty is string && data.leadSpecialty.size() >= 2 && data.leadSpecialty.size() <= 100 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.turnaroundLabel is string && data.turnaroundLabel.size() >= 2 && data.turnaroundLabel.size() <= 80 &&
+        data.botModerationEnabled is bool &&
+        data.botAutoMaskPii is bool &&
+        data.botAutoEscalateRedFlags is bool &&
+        data.active is bool &&
+        isValidId(data.addedByUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // 4. Collection Rules
 
     // Startup connection probe
@@ -381,66 +497,61 @@ service cloud.firestore {
       allow get: if true;
     }
 
-    // Users & Isolated PII
+    // Users & Isolated PII (Strictly Owner-Only — Admin cannot view, list, edit, or delete other user accounts)
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isValidId(userId) && isSignedIn() && isValidUserAccount(incoming()) &&
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUserAccount(incoming()) &&
         incoming().uid == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
-          (incoming().role == 'patient' && incoming().verifiedRoleStatus == 'active' && isOwner(userId)) ||
-          isAdmin()
+          (incoming().role == 'patient' && incoming().verifiedRoleStatus == 'active') ||
+          (isAdmin() && incoming().role == 'administrator' && incoming().verifiedRoleStatus == 'active')
         );
-      allow update: if isValidId(userId) && isSignedIn() && isValidUserAccount(incoming()) &&
+      allow update: if isValidId(userId) && isOwner(userId) && isValidUserAccount(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          isAdmin() ||
-          (isOwner(userId) &&
-            incoming().role == existing().role &&
+          (isAdmin() && incoming().role == 'administrator' && incoming().verifiedRoleStatus == 'active') ||
+          (incoming().role == existing().role &&
             incoming().verifiedRoleStatus == existing().verifiedRoleStatus &&
             incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'city', 'facilityOrSpecialty', 'medicalHistory', 'updatedAt']))
         );
-      allow delete: if isValidId(userId) && isAdmin();
+      allow delete: if false;
 
       match /private/{docId} {
-        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
-        allow create, update: if isValidId(userId) && isValidId(docId) && isSignedIn() &&
+        allow get: if isValidId(userId) && isValidId(docId) && isOwner(userId);
+        allow create, update: if isValidId(userId) && isValidId(docId) && isOwner(userId) &&
           isValidUserPrivateInfo(incoming()) &&
           incoming().uid == userId &&
-          incoming().updatedAt == request.time &&
-          (isOwner(userId) || isAdmin());
-        allow delete: if isValidId(userId) && isValidId(docId) && isAdmin();
+          incoming().updatedAt == request.time;
+        allow delete: if false;
       }
     }
 
     match /admins/{adminId} {
-      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
-      allow list: if isAdmin();
-      allow create, update, delete: if isValidId(adminId) && isAdmin();
+      allow get: if isValidId(adminId) && isOwner(adminId);
+      allow list: if false;
+      allow create, update: if isValidId(adminId) && isOwner(adminId) && isAdmin();
+      allow delete: if false;
     }
 
     match /roleRequests/{requestId} {
-      allow get: if isValidId(requestId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow get: if isValidId(requestId) && isSignedIn() && existing().uid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow create: if isValidId(requestId) && isVerifiedUser() && isValidRoleRequest(incoming()) &&
         incoming().uid == request.auth.uid &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isValidId(requestId) && isAdmin() && isValidRoleRequest(incoming()) &&
-        incoming().uid == existing().uid &&
-        incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time;
-      allow delete: if isValidId(requestId) && isAdmin();
+      allow update, delete: if false;
     }
 
     match /familyProfiles/{profileId} {
-      allow get: if isValidId(profileId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(profileId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(profileId) && isVerifiedUser() && isValidFamilyProfile(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time &&
@@ -449,20 +560,18 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        (existing().ownerUid == request.auth.uid || isAdmin());
-      allow delete: if isValidId(profileId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid;
+      allow delete: if isValidId(profileId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /bpReadings/{readingId} {
       allow get: if isValidId(readingId) && isSignedIn() && (
         existing().ownerUid == request.auth.uid ||
-        existing().sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        existing().sharedWithDoctorUid == request.auth.uid
       );
       allow list: if isSignedIn() && (
         resource.data.ownerUid == request.auth.uid ||
-        resource.data.sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        resource.data.sharedWithDoctorUid == request.auth.uid
       );
       allow create: if isValidId(readingId) && isVerifiedUser() && isValidBpReading(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
@@ -470,24 +579,19 @@ service cloud.firestore {
       allow update: if isValidId(readingId) && isVerifiedUser() && isValidBpReading(incoming()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
-        (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid']))
-        );
-      allow delete: if isValidId(readingId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid']);
+      allow delete: if isValidId(readingId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /glucoseReadings/{readingId} {
       allow get: if isValidId(readingId) && isSignedIn() && (
         existing().ownerUid == request.auth.uid ||
-        existing().sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        existing().sharedWithDoctorUid == request.auth.uid
       );
       allow list: if isSignedIn() && (
         resource.data.ownerUid == request.auth.uid ||
-        resource.data.sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        resource.data.sharedWithDoctorUid == request.auth.uid
       );
       allow create: if isValidId(readingId) && isVerifiedUser() && isValidGlucoseReading(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
@@ -495,24 +599,19 @@ service cloud.firestore {
       allow update: if isValidId(readingId) && isVerifiedUser() && isValidGlucoseReading(incoming()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
-        (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid']))
-        );
-      allow delete: if isValidId(readingId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid']);
+      allow delete: if isValidId(readingId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /medicalDocuments/{docId} {
       allow get: if isValidId(docId) && isSignedIn() && (
         existing().ownerUid == request.auth.uid ||
-        existing().sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        existing().sharedWithDoctorUid == request.auth.uid
       );
       allow list: if isSignedIn() && (
         resource.data.ownerUid == request.auth.uid ||
-        resource.data.sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        resource.data.sharedWithDoctorUid == request.auth.uid
       );
       allow create: if isValidId(docId) && isVerifiedUser() && isValidMedicalDocument(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
@@ -520,62 +619,57 @@ service cloud.firestore {
       allow update: if isValidId(docId) && isVerifiedUser() && isValidMedicalDocument(incoming()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
-        (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid', 'plainSummary']))
-        );
-      allow delete: if isValidId(docId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid', 'plainSummary']);
+      allow delete: if isValidId(docId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /appointments/{appointmentId} {
       allow get: if isValidId(appointmentId) && isSignedIn() && (
         existing().patientUid == request.auth.uid ||
         existing().doctorUid == request.auth.uid ||
-        existing().hospitalUid == request.auth.uid ||
-        isAdmin()
+        existing().hospitalUid == request.auth.uid
       );
       allow list: if isSignedIn() && (
         resource.data.patientUid == request.auth.uid ||
         resource.data.doctorUid == request.auth.uid ||
-        resource.data.hospitalUid == request.auth.uid ||
-        isAdmin()
+        resource.data.hospitalUid == request.auth.uid
       );
       allow create: if isValidId(appointmentId) && isVerifiedUser() && isValidAppointment(incoming()) &&
-        incoming().patientUid == request.auth.uid &&
         incoming().status in ['Pending Payment', 'Confirmed'] &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time && (
+          incoming().patientUid == request.auth.uid ||
+          (isVerifiedDoctor() &&
+            ('doctorUid' in incoming()) &&
+            incoming().doctorUid == request.auth.uid &&
+            incoming().mode == 'In-Person')
+        );
       allow update: if isValidId(appointmentId) && isVerifiedUser() && isValidAppointment(incoming()) &&
         incoming().patientUid == existing().patientUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        (
-          isAdmin() ||
-          (existing().status != 'Completed' && existing().status != 'Cancelled' && (
-            (existing().patientUid == request.auth.uid &&
-              incoming().status in ['Rescheduled', 'Cancelled'] &&
-              incoming().diff(existing()).affectedKeys().hasOnly(['date', 'time', 'status', 'updatedAt'])) ||
-            (((existing().doctorUid == request.auth.uid && isVerifiedDoctor()) ||
-              (existing().hospitalUid == request.auth.uid && isVerifiedHospital())) &&
-              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'clinicalNotes', 'updatedAt']))
-          ))
+        existing().status != 'Completed' && existing().status != 'Cancelled' && (
+          (existing().patientUid == request.auth.uid &&
+            incoming().status in ['Rescheduled', 'Cancelled'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['date', 'time', 'startTime', 'endTime', 'status', 'updatedAt'])) ||
+          (((existing().doctorUid == request.auth.uid && isVerifiedDoctor()) ||
+            (existing().hospitalUid == request.auth.uid && isVerifiedHospital())) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'clinicalNotes', 'updatedAt']))
         );
-      allow delete: if isValidId(appointmentId) && isAdmin();
+      allow delete: if false;
     }
 
     match /emergencyRequests/{requestId} {
       allow get: if isValidId(requestId) && isSignedIn() && (
         existing().patientUid == request.auth.uid ||
         existing().hospitalUid == request.auth.uid ||
-        isVerifiedHospital() ||
-        isAdmin()
+        isVerifiedHospital()
       );
       allow list: if isSignedIn() && (
         resource.data.patientUid == request.auth.uid ||
         resource.data.hospitalUid == request.auth.uid ||
-        (isVerifiedHospital() && resource.data.stage == 'submitted') ||
-        isAdmin()
+        (isVerifiedHospital() && resource.data.stage == 'submitted')
       );
       allow create: if isValidId(requestId) && isVerifiedUser() && isValidEmergencyRequest(incoming()) &&
         incoming().patientUid == request.auth.uid &&
@@ -587,7 +681,6 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          isAdmin() ||
           (existing().stage != 'resolved' && (
             ((existing().hospitalUid == request.auth.uid || !('hospitalUid' in existing())) && isVerifiedHospital()) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['stage', 'hospitalUid', 'partnerUnit', 'etaMinutes', 'updatedAt'])
@@ -597,36 +690,35 @@ service cloud.firestore {
             incoming().stage == 'resolved' &&
             incoming().diff(existing()).affectedKeys().hasOnly(['stage', 'updatedAt']))
         );
-      allow delete: if isValidId(requestId) && isAdmin();
+      allow delete: if false;
     }
 
     match /transactions/{txId} {
-      allow get: if isValidId(txId) && isSignedIn() && (existing().patientUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.patientUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(txId) && isSignedIn() && existing().patientUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.patientUid == request.auth.uid;
       allow create: if isValidId(txId) && isVerifiedUser() && isValidTransaction(incoming()) &&
         incoming().patientUid == request.auth.uid &&
         incoming().status in ['Paid (Demo Sandbox)', 'Paid via Wallet', 'Pending Verification', 'Verified'] &&
         incoming().createdAt == request.time;
-      allow update: if isValidId(txId) && isAdmin() && isValidTransaction(incoming());
-      allow delete: if isValidId(txId) && isAdmin();
+      allow update, delete: if false;
     }
 
     match /emergencyContacts/{contactId} {
-      allow get: if isValidId(contactId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(contactId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(contactId) && isVerifiedUser() && isValidEmergencyContact(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time;
       allow update: if isValidId(contactId) && isVerifiedUser() && isValidEmergencyContact(incoming()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
-        (existing().ownerUid == request.auth.uid || isAdmin());
-      allow delete: if isValidId(contactId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid;
+      allow delete: if isValidId(contactId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /auditLogs/{logId} {
-      allow get: if isValidId(logId) && isSignedIn() && (existing().actorUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.actorUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(logId) && isSignedIn() && existing().actorUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.actorUid == request.auth.uid;
       allow create: if isValidId(logId) && isVerifiedUser() && isValidAuditLog(incoming()) &&
         incoming().actorUid == request.auth.uid &&
         incoming().createdAt == request.time;
@@ -634,18 +726,18 @@ service cloud.firestore {
     }
 
     match /aiConsultations/{consultationId} {
-      allow get: if isValidId(consultationId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(consultationId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(consultationId) && isVerifiedUser() && isValidAiConsultation(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time;
       allow update: if false;
-      allow delete: if isValidId(consultationId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isValidId(consultationId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /medicationReminders/{reminderId} {
-      allow get: if isValidId(reminderId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(reminderId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(reminderId) && isVerifiedUser() && isValidMedicationReminder(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time &&
@@ -654,21 +746,18 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
+        existing().ownerUid == request.auth.uid &&
         (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['enabled', 'updatedAt'])) ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['lastTakenDate', 'updatedAt'])) ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'dosage', 'category', 'timeOfDay', 'frequency', 'schedule', 'notes', 'enabled', 'updatedAt']))
+          incoming().diff(existing()).affectedKeys().hasOnly(['enabled', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['lastTakenDate', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'dosage', 'category', 'timeOfDay', 'frequency', 'schedule', 'notes', 'enabled', 'updatedAt'])
         );
-      allow delete: if isValidId(reminderId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isValidId(reminderId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /walletTransactions/{entryId} {
-      allow get: if isValidId(entryId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(entryId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(entryId) && isVerifiedUser() && isValidWalletTransaction(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time &&
@@ -691,13 +780,11 @@ service cloud.firestore {
     match /rehabSessions/{sessionId} {
       allow get: if isValidId(sessionId) && isSignedIn() && (
         existing().ownerUid == request.auth.uid ||
-        (existing().sharedWithDoctorUid == request.auth.uid && isVerifiedDoctor()) ||
-        isAdmin()
+        (existing().sharedWithDoctorUid == request.auth.uid && isVerifiedDoctor())
       );
       allow list: if isSignedIn() && (
         resource.data.ownerUid == request.auth.uid ||
-        resource.data.sharedWithDoctorUid == request.auth.uid ||
-        isAdmin()
+        resource.data.sharedWithDoctorUid == request.auth.uid
       );
       allow create: if isValidId(sessionId) && isVerifiedUser() && isValidRehabSession(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
@@ -705,24 +792,22 @@ service cloud.firestore {
       allow update: if isValidId(sessionId) && isVerifiedUser() && isValidRehabSession(incoming()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
+        existing().ownerUid == request.auth.uid &&
         (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid'])) ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['notes']))
+          incoming().diff(existing()).affectedKeys().hasOnly(['sharedWithDoctorUid']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['notes'])
         );
-      allow delete: if isValidId(sessionId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isValidId(sessionId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /cycleLogs/{logId} {
-      allow get: if isValidId(logId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(logId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(logId) && isVerifiedUser() && isValidCycleLog(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time;
       allow update: if false;
-      allow delete: if isValidId(logId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isValidId(logId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     function isValidPaymentRecord(data) {
@@ -752,8 +837,8 @@ service cloud.firestore {
     }
 
     match /vaccinationRecords/{recordId} {
-      allow get: if isValidId(recordId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(recordId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(recordId) && isVerifiedUser() && isValidVaccinationRecord(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time &&
@@ -762,44 +847,108 @@ service cloud.firestore {
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        (
-          isAdmin() ||
-          (existing().ownerUid == request.auth.uid &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'date', 'facilityName', 'notes', 'updatedAt']))
-        );
-      allow delete: if isValidId(recordId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+        existing().ownerUid == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'date', 'facilityName', 'notes', 'updatedAt']);
+      allow delete: if isValidId(recordId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
     }
 
     match /payments/{paymentId} {
-      allow get: if isValidId(paymentId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(paymentId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(paymentId) && isVerifiedUser() && isValidPaymentRecord(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().payment_status == 'PENDING' &&
         incoming().created_at == request.time &&
         incoming().updated_at == request.time;
-      allow update: if isValidId(paymentId) && isAdmin() && isValidPaymentRecord(incoming()) &&
-        incoming().ownerUid == existing().ownerUid &&
-        incoming().transaction_reference == existing().transaction_reference &&
-        incoming().created_at == existing().created_at &&
-        incoming().updated_at == request.time;
-      allow delete: if false;
+      allow update, delete: if false;
     }
 
     match /webhookEvents/{eventId} {
-      allow get: if isValidId(eventId) && isAdmin();
-      allow list: if isAdmin();
+      allow get, list: if false;
       allow create, update, delete: if false;
     }
 
     match /wearableReadings/{readingId} {
-      allow get: if isValidId(readingId) && isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow get: if isValidId(readingId) && isSignedIn() && existing().ownerUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow create: if isValidId(readingId) && isVerifiedUser() && isValidWearableReading(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().createdAt == request.time;
       allow update: if false;
-      allow delete: if isValidId(readingId) && isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isValidId(readingId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
+    }
+
+    // Verified Partner Hospitals Directory (Public read; Admin-Only create/update/delete)
+    match /hospitals/{hospitalId} {
+      allow get, list: if true;
+      allow create: if isValidId(hospitalId) && isAdmin() && isValidPartnerHospital(incoming()) &&
+        incoming().addedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(hospitalId) && isAdmin() && isValidPartnerHospital(incoming()) &&
+        incoming().addedByUid == existing().addedByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isValidId(hospitalId) && isAdmin();
+    }
+
+    // Verified Partner Doctors Directory (Public read; Admin manages all; Verified Hospitals manage ONLY their own doctors)
+    match /partnerDoctors/{doctorId} {
+      allow get, list: if true;
+      allow create: if isValidId(doctorId) && isValidPartnerDoctor(incoming()) &&
+        incoming().addedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isVerifiedHospital() &&
+            ('hospitalOwnerUid' in incoming()) &&
+            incoming().hospitalOwnerUid == request.auth.uid)
+        );
+      allow update: if isValidId(doctorId) && isValidPartnerDoctor(incoming()) &&
+        incoming().addedByUid == existing().addedByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isVerifiedHospital() &&
+            ('hospitalOwnerUid' in existing()) &&
+            existing().hospitalOwnerUid == request.auth.uid &&
+            ('hospitalOwnerUid' in incoming()) &&
+            incoming().hospitalOwnerUid == request.auth.uid)
+        );
+      allow delete: if isValidId(doctorId) && (
+        isAdmin() ||
+        (isVerifiedHospital() &&
+          ('hospitalOwnerUid' in existing()) &&
+          existing().hospitalOwnerUid == request.auth.uid)
+      );
+    }
+
+    // Website Care Teams & Services (Public read; Admin-Only create/update/delete; monitored by Sentinel Bot)
+    match /platformServices/{serviceId} {
+      allow get, list: if true;
+      allow create: if isValidId(serviceId) && isAdmin() && isValidPlatformService(incoming()) &&
+        incoming().addedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(serviceId) && isAdmin() && isValidPlatformService(incoming()) &&
+        incoming().addedByUid == existing().addedByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'category', 'description', 'leadSpecialty', 'city', 'turnaroundLabel',
+          'botModerationEnabled', 'botAutoMaskPii', 'botAutoEscalateRedFlags', 'active', 'updatedAt'
+        ]);
+      allow delete: if isValidId(serviceId) && isAdmin();
+    }
+
+    // Masked Chat Safety & Sentinel Bot Moderation Feed (Read-Only monitoring for Admin; immutable)
+    match /chatModerationEvents/{eventId} {
+      allow get: if isValidId(eventId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(eventId) && isVerifiedUser() && isValidChatModerationEvent(incoming()) &&
+        incoming().actorUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
     }
   }
 }

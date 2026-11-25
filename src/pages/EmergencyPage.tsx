@@ -12,10 +12,10 @@ import {
   Watch,
   X,
 } from 'lucide-react';
-import { DEMO_FACILITIES } from '../data/mockNigeriaData';
 import { useApp } from '../context/AppContext';
 import { LocationModal } from '../components/modals/LocationModal';
 import { EmergencyMedicalQrCard } from '../components/emergency/EmergencyMedicalQrCard';
+import { TwilioEmergencySmsPanel } from '../components/emergency/TwilioEmergencySmsPanel';
 import {
   findNearestEmergencyHospitals,
   requestBrowserGpsLocation,
@@ -35,6 +35,7 @@ export function EmergencyPage() {
     updateFamilyProfile,
     criticalWearableAlert,
     clearCriticalWearableAlert,
+    allFacilities,
   } = useApp();
 
   const [locationModalOpen, setLocationOpen] = useState(false);
@@ -44,7 +45,7 @@ export function EmergencyPage() {
     'Ambulance Dispatch Request'
   );
   const [notes, setNotes] = useState('');
-  const [selectedHospitalId, setSelectedHospitalId] = useState(DEMO_FACILITIES[0].id);
+  const [selectedHospitalId, setSelectedHospitalId] = useState(allFacilities[0]?.id || '');
 
   const [emgError, setEmgError] = useState<string | null>(null);
   const activeProfile =
@@ -63,8 +64,8 @@ export function EmergencyPage() {
     emergencyContacts.find((c) => c.isPrimary) || emergencyContacts[0] || null;
 
   const rankedHospitals = useMemo(
-    () => findNearestEmergencyHospitals(DEMO_FACILITIES, userLocation.coordinates),
-    [userLocation.coordinates]
+    () => findNearestEmergencyHospitals(allFacilities, userLocation.coordinates),
+    [allFacilities, userLocation.coordinates]
   );
 
   const chosenRanked =
@@ -459,6 +460,25 @@ export function EmergencyPage() {
                 </div>
               </div>
             )}
+
+            {/* Automated Twilio Emergency SMS Alert with Last Known GPS Coordinates */}
+            <TwilioEmergencySmsPanel
+              patientName={activeProfile.fullName}
+              bloodGroup={activeProfile.bloodGroup}
+              allergies={activeProfile.allergies}
+              locationLabel={userLocation.label}
+              coordinates={userLocation.coordinates}
+              emergencyType={
+                criticalWearableAlert ? 'Watch Critical Alert' : requestType
+              }
+              notes={
+                criticalWearableAlert
+                  ? `Watch Critical Alert: ${criticalWearableAlert.reasons.join('; ')}. ${notes}`.trim()
+                  : notes
+              }
+              gpsLocking={gpsLocking}
+              onRefreshGps={() => void handleOneTapGps()}
+            />
           </div>
 
           {/* Right Column: Nearest GPS 24/7 Emergency Hospitals & Direct-Call Contacts */}

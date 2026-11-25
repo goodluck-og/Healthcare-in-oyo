@@ -153,6 +153,7 @@ export const POPULAR_SERVICES: HealthcareService[] = [
 export const DEMO_DOCTORS: Doctor[] = [
   {
     id: 'doc-adewale',
+    doctorUid: 'demo-doctor-portal',
     name: 'Dr. Adewale Ogunleye',
     specialty: 'Cardiology & Hypertension',
     credentials: 'MBBS (Ibadan), FWACP (Cardiology)',

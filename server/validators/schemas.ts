@@ -109,3 +109,34 @@ export const smsOtpVerifySchema = z.object({
     .trim()
     .regex(/^[0-9]{6}$/, 'Verification code must be 6 digits'),
 });
+
+export const emergencySmsDispatchSchema = z.object({
+  patientName: z.string().trim().min(1, 'Patient name is required').max(100),
+  emergencyType: z
+    .enum(['SOS Medical Triage', 'Ambulance Dispatch Request', 'Watch Critical Alert'])
+    .default('SOS Medical Triage'),
+  locationLabel: z.string().trim().min(1, 'Location label is required').max(200),
+  coordinates: z
+    .object({
+      lat: z.number().finite().min(-90).max(90),
+      lng: z.number().finite().min(-180).max(180),
+    })
+    .nullable()
+    .optional(),
+  bloodGroup: z.string().trim().max(20).optional(),
+  allergies: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(300).optional(),
+  contacts: z
+    .array(
+      z.object({
+        id: z.string().trim().max(80).optional(),
+        name: z.string().trim().min(1, 'Contact name is required').max(80),
+        phone: z
+          .string()
+          .trim()
+          .regex(/^\+?[0-9\s()-]{7,20}$/, 'Enter a valid E.164 or Nigerian phone number'),
+      })
+    )
+    .min(1, 'Select at least one emergency contact')
+    .max(5, 'You can alert up to 5 emergency contacts at once'),
+});

@@ -10,6 +10,7 @@ import {
   securityHeadersMiddleware,
 } from './middleware/security.ts';
 import { createAiRouter } from './routes/aiRoutes.ts';
+import { createEmergencyRouter } from './routes/emergencyRoutes.ts';
 import { createHealthRouter } from './routes/healthRoutes.ts';
 import { createPaymentRouter } from './routes/paymentRoutes.ts';
 import { createVerificationRouter } from './routes/verificationRoutes.ts';
@@ -22,6 +23,7 @@ export interface CreateAppOptions {
     paymentMax?: number;
     webhookMax?: number;
     aiMax?: number;
+    emergencySmsMax?: number;
   };
 }
 
@@ -62,6 +64,11 @@ export function createApiApp(options: CreateAppOptions = {}) {
     maxRequests: options.rateLimits?.aiMax ?? 30,
     scope: 'ai-assistant',
   });
+  const emergencySmsRateLimit = createRateLimiter({
+    windowMs: 60_000,
+    maxRequests: options.rateLimits?.emergencySmsMax ?? 6,
+    scope: 'emergency-sms',
+  });
 
   app.use(createHealthRouter());
   app.use('/api/ai', aiRateLimit);
@@ -77,6 +84,13 @@ export function createApiApp(options: CreateAppOptions = {}) {
   );
   app.use('/api/verification', paymentRateLimit);
   app.use(createVerificationRouter(requireAuth));
+  app.use(
+    createEmergencyRouter({
+      requireAuth,
+      emergencySmsRateLimit,
+      fetchImpl: options.fetchImpl,
+    })
+  );
 
   // Secure Error Handler — never leak internal stack traces or secrets to clients
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

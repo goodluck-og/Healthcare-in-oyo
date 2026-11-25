@@ -15,6 +15,8 @@ import {
 } from 'firebase/auth';
 import { auth, isFirestoreOfflineError } from '../firebaseConfig';
 import {
+  DEMO_DOCTORS,
+  DEMO_FACILITIES,
   INITIAL_APPOINTMENTS,
   INITIAL_BP_READINGS,
   INITIAL_DOCUMENTS,
@@ -27,12 +29,19 @@ import {
   OYO_SUBSCRIPTION_PLANS,
 } from '../data/mockNigeriaData';
 import {
-  adminListAllUsers,
+  ADMIN_GMAIL_ACCOUNT,
+  DEMO_SANDBOX_ACCOUNTS,
+  findDemoSandboxByEmail,
+  matchDemoSandboxCredentials,
+  type DemoSandboxAccount,
+} from '../data/demoAccounts';
+import {
   bootstrapPrimaryProfileIfMissing,
   cancelAppointmentWithWalletRefund,
   createAiConsultationDoc,
   createAppointmentDoc,
   createBpReadingDoc,
+  createChatModerationEventDoc,
   createCycleLogDoc,
   createEmergencyContactDoc,
   createEmergencyRequestDoc,
@@ -40,6 +49,9 @@ import {
   createGlucoseReadingDoc,
   createMedicalDocumentDoc,
   createMedicationReminderDoc,
+  createPartnerDoctorDoc,
+  createPartnerHospitalDoc,
+  createPlatformServiceDoc,
   createRehabSessionDoc,
   createTransactionDoc,
   createVaccinationRecordDoc,
@@ -48,18 +60,23 @@ import {
   deleteAiConsultationDoc,
   deleteCycleLogDoc,
   deleteMedicationReminderDoc,
+  deletePartnerDoctorDoc,
+  deletePartnerHospitalDoc,
+  deletePlatformServiceDoc,
   deleteRehabSessionDoc,
   deleteVaccinationRecordDoc,
   ensureUserAccountRecords,
   markMedicationReminderTakenDoc,
   resolveEmergencyByPatient,
-  reviewRoleRequestAsAdmin,
   shareBpReadingWithDoctor,
   shareGlucoseReadingWithDoctor,
   shareMedicalDocumentWithDoctor,
   shareRehabSessionWithDoctor,
   submitRoleVerificationRequest,
+  subscribePartnerDoctors,
+  subscribePartnerHospitals,
   subscribePatientWorkspace,
+  subscribePlatformServices,
   subscribeRolePortalStreams,
   subscribeUserDocuments,
   updateAppointmentByPatient,
@@ -67,6 +84,7 @@ import {
   updateEmergencyStageByHospital,
   updateFamilyProfileDoc,
   updateMedicationReminderStatusDoc,
+  updatePlatformServiceDoc,
   updateUserAccountDoc,
   updateUserPrivateContact,
   updateVaccinationRecordDoc,
@@ -85,12 +103,15 @@ import type {
   AppRoute,
   AuditLogEntry,
   BloodPressureReading,
+  ChatModerationEvent,
   CheckoutDraft,
   ConfirmedGender,
   Coordinates,
   CycleLog,
+  Doctor,
   EmergencyContact,
   EmergencyRequest,
+  Facility,
   FamilyProfile,
   FlowIntensity,
   GlucoseReading,
@@ -99,6 +120,7 @@ import type {
   LabResult,
   MedicalDocument,
   MedicationReminder,
+  PlatformService,
   Prescription,
   RehabBodyArea,
   RehabSession,
@@ -187,9 +209,17 @@ interface AppContextValue {
   privateInfo: UserPrivateInfo | null;
   user: SessionUserSummary;
   isGuestDemo: boolean;
+  isDemoSandbox: boolean;
+  activeDemoAccount: DemoSandboxAccount | null;
+  preferredDashboardTab: 'overview' | 'portals' | 'wearable' | 'qr' | null;
+  clearPreferredDashboardTab: () => void;
   integrationStatus: IntegrationStatus;
   googleSignInPending: boolean;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (
+    loginHintEmail?: string,
+    onboarding?: HealthOnboardingPayload
+  ) => Promise<void>;
+  signInAsDemoAccount: (accountId: string) => boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (
     name: string,
@@ -223,12 +253,17 @@ interface AppContextValue {
   appointments: Appointment[];
   bookOnlineConsultation: (meta: {
     doctorId: string;
+    doctorUid?: string;
     doctorName: string;
     specialty: string;
     facilityName: string;
     city: string;
     date: string;
     time: string;
+    startTime?: string;
+    endTime?: string;
+    mode?: 'Video Telehealth' | 'In-Person';
+    patientName?: string;
     reason?: string;
   }) => Promise<Appointment>;
   bookPhysicalExamFollowUp: (params: {
@@ -371,6 +406,15 @@ interface AppContextValue {
     status: 'Confirmed' | 'Completed' | 'Rescheduled' | 'Cancelled',
     clinicalNotes?: string
   ) => Promise<void>;
+  blockDoctorPhysicalSlot: (input: {
+    patientName: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    facilityName: string;
+    city: string;
+    notes?: string;
+  }) => Promise<Appointment>;
   hospitalAppointments: Appointment[];
   hospitalEmergencies: EmergencyRequest[];
   hospitalUpdateEmergency: (
@@ -379,11 +423,36 @@ interface AppContextValue {
     partnerUnit?: string,
     etaMinutes?: number
   ) => Promise<void>;
-  adminRoleRequests: RoleRequest[];
-  adminAuditLogs: AuditLogEntry[];
-  adminUsers: UserAccount[];
-  loadAdminUsers: () => Promise<void>;
-  adminReviewRoleRequest: (request: RoleRequest, decision: 'approved' | 'rejected') => Promise<void>;
+  partnerHospitals: Facility[];
+  allFacilities: Facility[];
+  addPartnerHospital: (input: Omit<Facility, 'id'>) => Promise<Facility>;
+  removePartnerHospital: (hospitalId: string) => Promise<void>;
+  partnerDoctors: Doctor[];
+  allDoctors: Doctor[];
+  myHospitalDoctors: Doctor[];
+  addPartnerDoctor: (input: Omit<Doctor, 'id' | 'rating' | 'reviewCount'>) => Promise<Doctor>;
+  removePartnerDoctor: (doctorId: string) => Promise<void>;
+  addHospitalDoctor: (input: Omit<Doctor, 'id' | 'rating' | 'reviewCount' | 'hospitalOwnerUid'>) => Promise<Doctor>;
+  removeHospitalDoctor: (doctorId: string) => Promise<void>;
+  platformServices: PlatformService[];
+  allPlatformServices: PlatformService[];
+  addPlatformService: (
+    input: Omit<PlatformService, 'id' | 'addedByUid' | 'createdAt'>
+  ) => Promise<PlatformService>;
+  togglePlatformServiceBot: (
+    serviceId: string,
+    updates: Partial<
+      Pick<
+        PlatformService,
+        'botModerationEnabled' | 'botAutoMaskPii' | 'botAutoEscalateRedFlags' | 'active'
+      >
+    >
+  ) => Promise<void>;
+  removePlatformService: (serviceId: string) => Promise<void>;
+  chatModerationEvents: ChatModerationEvent[];
+  recordChatModerationEvent: (
+    input: Omit<ChatModerationEvent, 'id' | 'actorUid' | 'createdAt'>
+  ) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -404,6 +473,63 @@ const VALID_ROUTES: AppRoute[] = [
 ];
 
 const SUBSCRIPTION_STORAGE_KEY = 'hc_oyo_active_subscription_v1';
+const SYNCED_PHYSICAL_BOOKINGS_KEY = 'healthconnect_synced_physical_bookings_v1';
+
+function readSyncedPhysicalBookings(): Appointment[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(SYNCED_PHYSICAL_BOOKINGS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Appointment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSyncedPhysicalBooking(appointment: Appointment): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = readSyncedPhysicalBookings().filter((a) => a.id !== appointment.id);
+    window.localStorage.setItem(
+      SYNCED_PHYSICAL_BOOKINGS_KEY,
+      JSON.stringify([appointment, ...existing].slice(0, 60))
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function updateSyncedPhysicalBooking(
+  appointmentId: string,
+  status: Appointment['status'],
+  clinicalNotes?: string
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = readSyncedPhysicalBookings();
+    const updated = existing.map((a) =>
+      a.id === appointmentId
+        ? { ...a, status, clinicalNotes: clinicalNotes ?? a.clinicalNotes }
+        : a
+    );
+    window.localStorage.setItem(SYNCED_PHYSICAL_BOOKINGS_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function mergeAppointmentsById(primary: Appointment[], secondary: Appointment[]): Appointment[] {
+  const seen = new Set<string>();
+  const merged: Appointment[] = [];
+  for (const item of [...primary, ...secondary]) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
 
 function computeRenewalDateIso(fromIso?: string): string {
   const base = fromIso ? new Date(fromIso) : new Date();
@@ -457,7 +583,7 @@ function mapFirebaseAuthError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
 
   if (code === 'auth/operation-not-allowed') {
-    return 'Email/Password sign-in is not yet enabled in Firebase Console. Use Google Sign-In below, or enable Email/Password under Firebase Console > Authentication > Sign-in method.';
+    return 'Email/Password sign-in is not enabled in Firebase Authentication yet. Use "Continue with Google" (ready now), or enable Email/Password under Firebase Console > Authentication > Sign-in method.';
   }
   if (
     code === 'auth/popup-closed-by-user' ||
@@ -512,6 +638,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const pendingPostLoginRouteRef = useRef<AppRoute | null>(null);
   const pendingCheckoutDraftRef = useRef<CheckoutDraft | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [activeDemoAccount, setActiveDemoAccount] = useState<DemoSandboxAccount | null>(null);
+  const [preferredDashboardTab, setPreferredDashboardTab] = useState<
+    'overview' | 'portals' | 'wearable' | 'qr' | null
+  >(null);
   const [emailVerifiedFlag, setEmailVerifiedFlag] = useState(false);
   const [userProfile, setUserProfile] = useState<UserAccount | null>(null);
   const [privateInfo, setPrivateInfo] = useState<UserPrivateInfo | null>(null);
@@ -663,9 +793,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [doctorSharedDocs, setDoctorSharedDocs] = useState<MedicalDocument[]>([]);
   const [hospitalAppointments, setHospitalAppointments] = useState<Appointment[]>([]);
   const [hospitalEmergencies, setHospitalEmergencies] = useState<EmergencyRequest[]>([]);
-  const [adminRoleRequests, setAdminRoleRequests] = useState<RoleRequest[]>([]);
-  const [adminAuditLogs, setAdminAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [adminUsers, setAdminUsers] = useState<UserAccount[]>([]);
+  const [partnerHospitals, setPartnerHospitals] = useState<Facility[]>([]);
+  const [partnerDoctors, setPartnerDoctors] = useState<Doctor[]>([]);
+  const [hospitalDemoDoctors, setHospitalDemoDoctors] = useState<Doctor[]>([]);
+  const [platformServices, setPlatformServices] = useState<PlatformService[]>([]);
+  const [chatModerationEvents, setChatModerationEvents] = useState<ChatModerationEvent[]>([]);
 
   const [checkoutDraft, setCheckoutDraft] = useState<CheckoutDraft | null>(null);
   const [selectedCheckoutPlanId, setSelectedCheckoutPlanId] = useState<SubscriptionPlanId>(
@@ -776,6 +908,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // Public subscriptions to Admin-added Partner Hospitals, Partner Doctors, and Bot-Managed Teams/Services
+  useEffect(() => {
+    const unsubHosp = subscribePartnerHospitals((items) => {
+      setPartnerHospitals(items);
+    });
+    const unsubDocs = subscribePartnerDoctors((items) => {
+      setPartnerDoctors(items);
+    });
+    const unsubServices = subscribePlatformServices((items) => {
+      setPlatformServices(items);
+    });
+    return () => {
+      unsubHosp();
+      unsubDocs();
+      unsubServices();
+    };
+  }, []);
+
   // Auth & Firestore workspace synchronization
   useEffect(() => {
     let unsubUserDocs: (() => void) | undefined;
@@ -819,13 +969,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setDoctorSharedDocs([]);
         setHospitalAppointments([]);
         setHospitalEmergencies([]);
-        setAdminRoleRequests([]);
-        setAdminAuditLogs([]);
-        setAdminUsers([]);
+        setChatModerationEvents([]);
         setAuthLoading(false);
         return;
       }
 
+      setActiveDemoAccount(null);
       setFirebaseUser(fbUser);
       setEmailVerifiedFlag(Boolean(fbUser.emailVerified));
 
@@ -894,18 +1043,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
         }
 
-        if (fbUser.emailVerified && account.verifiedRoleStatus === 'active') {
+        const isAdminGmail =
+          (fbUser.email || '').trim().toLowerCase() === ADMIN_GMAIL_ACCOUNT && fbUser.emailVerified;
+        const effectiveRole: UserRole = isAdminGmail ? 'administrator' : account.role;
+        const effectiveStatus = isAdminGmail ? 'active' : account.verifiedRoleStatus;
+
+        if (fbUser.emailVerified && effectiveStatus === 'active') {
           unsubRole?.();
-          unsubRole = subscribeRolePortalStreams(fbUser.uid, account.role, {
+          unsubRole = subscribeRolePortalStreams(fbUser.uid, effectiveRole, {
             onDoctorAppointments: setDoctorAppointments,
             onSharedBp: setDoctorSharedBp,
             onSharedGlucose: setDoctorSharedGlucose,
             onSharedDocs: setDoctorSharedDocs,
             onHospitalAppointments: setHospitalAppointments,
             onHospitalEmergencies: setHospitalEmergencies,
-            onAdminRoleRequests: setAdminRoleRequests,
-            onAdminAuditLogs: setAdminAuditLogs,
+            onAdminChatModerationEvents: setChatModerationEvents,
           });
+          if (effectiveRole === 'administrator') {
+            setPreferredDashboardTab('portals');
+          }
         }
       };
 
@@ -952,11 +1108,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     target === '/' ||
     target === '/login' ||
     target === '/register' ||
-    target === '/payment-response';
+    target === '/payment-response' ||
+    target === '/ai-assistant' ||
+    target === '/emergency';
 
   const navigate = (to: AppRoute, hash?: string) => {
     let resolvedTarget: AppRoute = to;
-    if (!auth.currentUser && !firebaseUser && !isPublicRoute(to)) {
+    if (!auth.currentUser && !firebaseUser && !activeDemoAccount && !isPublicRoute(to)) {
       pendingPostLoginRouteRef.current = to;
       setPendingPostLoginRoute(to);
       setAuthNotice('Sign in to your HealthConnect account to access this section.');
@@ -1019,11 +1177,61 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
+  const activateDemoSandboxAccount = (demo: DemoSandboxAccount) => {
+    setAuthError(null);
+    setAuthNotice(null);
+    setActiveDemoAccount(demo);
+    setFamilyProfiles(demo.profiles);
+    setActiveProfileId(demo.profiles[0]?.id || '');
+    setEmergencyContacts(demo.emergencyContacts);
+    setBpReadings(demo.bpReadings);
+    setGlucoseReadings(demo.glucoseReadings);
+    setWearableReadings(demo.wearableReadings);
+    const syncedForDoctor =
+      demo.role === 'doctor'
+        ? readSyncedPhysicalBookings().filter(
+            (a) =>
+              a.mode === 'In-Person' &&
+              (!a.doctorUid || a.doctorUid === demo.id || a.doctorId === 'doc-adewale')
+          )
+        : [];
+    setDoctorAppointments(mergeAppointmentsById(syncedForDoctor, demo.doctorAppointments || []));
+    setDoctorSharedBp(demo.doctorSharedBp || []);
+    setDoctorSharedGlucose(demo.doctorSharedGlucose || []);
+    setDoctorSharedDocs(demo.doctorSharedDocs || []);
+    setHospitalEmergencies(demo.hospitalEmergencies || []);
+    setHospitalAppointments(demo.hospitalAppointments || []);
+    setHospitalDemoDoctors(demo.hospitalDoctors || []);
+    setPreferredDashboardTab(demo.defaultTab);
+    setOnboardingDismissed(true);
+    completePostLoginRedirect();
+  };
+
+  const signInAsDemoAccount = (accountId: string): boolean => {
+    const demo = DEMO_SANDBOX_ACCOUNTS.find((a) => a.id === accountId);
+    if (!demo) return false;
+    activateDemoSandboxAccount(demo);
+    return true;
+  };
+
+  const signInWithGoogle = async (
+    loginHintEmail?: string,
+    onboarding?: HealthOnboardingPayload
+  ) => {
     // Prevent concurrent signInWithPopup calls, which cancel the active Firebase
     // PopupOperation and can trigger "Pending promise was never set".
     if (googleSignInInFlightRef.current) {
       return googleSignInInFlightRef.current;
+    }
+
+    if (onboarding) {
+      pendingCityRef.current = onboarding.city || 'Ibadan';
+      pendingOnboardingRef.current = onboarding;
+      try {
+        window.sessionStorage.setItem('hc_pending_onboarding_v1', JSON.stringify(onboarding));
+      } catch {
+        // Ignore storage quota errors
+      }
     }
 
     const runSignIn = (async () => {
@@ -1031,8 +1239,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setGoogleSignInPending(true);
       try {
         const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
+        const customParams: Record<string, string> = { prompt: 'select_account' };
+        if (loginHintEmail?.trim()) {
+          customParams.login_hint = loginHintEmail.trim();
+        }
+        provider.setCustomParameters(customParams);
         const credential = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+        setActiveDemoAccount(null);
         setFirebaseUser(credential.user);
         completePostLoginRedirect();
       } catch (err) {
@@ -1042,6 +1255,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (msg.includes('Pending promise was never set') || (err as { code?: string })?.code === 'auth/cancelled-popup-request') {
           await new Promise((resolve) => setTimeout(resolve, 200));
           if (auth.currentUser) {
+            setActiveDemoAccount(null);
             setFirebaseUser(auth.currentUser);
             completePostLoginRedirect();
             return;
@@ -1060,6 +1274,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithEmail = async (email: string, password: string) => {
     setAuthError(null);
+    const trimmedEmail = email.trim();
+    const matchedDemo = matchDemoSandboxCredentials(trimmedEmail, password);
+    if (matchedDemo) {
+      loginFailureTrackerRef.current = { count: 0, lockedUntil: 0 };
+      activateDemoSandboxAccount(matchedDemo);
+      return;
+    }
+
+    // Prevent known demo emails with mistyped passwords from falling through to Firebase Email/Password auth
+    const demoAccountByEmail = findDemoSandboxByEmail(trimmedEmail);
+    if (demoAccountByEmail) {
+      setAuthError(
+        `Incorrect password for demo account ${demoAccountByEmail.email}. Check the password or click "Log In" on the ${demoAccountByEmail.label} card below.`
+      );
+      return;
+    }
+
+    // Admin account always authenticates cryptographically via Google Sign-In
+    if (trimmedEmail.toLowerCase() === ADMIN_GMAIL_ACCOUNT) {
+      setAuthError(
+        `Admin account (${ADMIN_GMAIL_ACCOUNT}) authenticates securely via Google Sign-In. Click "Admin Sign-In (Google)" above to unlock the live Administrator Console.`
+      );
+      return;
+    }
+
     const now = Date.now();
     if (loginFailureTrackerRef.current.lockedUntil > now) {
       const waitSec = Math.ceil((loginFailureTrackerRef.current.lockedUntil - now) / 1000);
@@ -1069,7 +1308,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      setActiveDemoAccount(null);
       loginFailureTrackerRef.current = { count: 0, lockedUntil: 0 };
       completePostLoginRedirect();
     } catch (err) {
@@ -1213,10 +1453,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAuthError(null);
     setAuthNotice(null);
     setCheckoutDraft(null);
+    setActiveDemoAccount(null);
+    setPreferredDashboardTab(null);
     pendingCheckoutDraftRef.current = null;
     pendingPostLoginRouteRef.current = null;
     setPendingPostLoginRoute(null);
-    await firebaseSignOut(auth);
+    if (firebaseUser) {
+      await firebaseSignOut(auth);
+    } else {
+      setFamilyProfiles(INITIAL_FAMILY_PROFILES);
+      setActiveProfileId(INITIAL_FAMILY_PROFILES[0].id);
+      setEmergencyContacts(INITIAL_EMERGENCY_CONTACTS);
+      setBpReadings(INITIAL_BP_READINGS);
+      setGlucoseReadings(INITIAL_GLUCOSE_READINGS);
+      setDoctorAppointments([]);
+      setDoctorSharedBp([]);
+      setDoctorSharedGlucose([]);
+      setDoctorSharedDocs([]);
+      setHospitalEmergencies([]);
+      setHospitalAppointments([]);
+    }
     if (typeof window !== 'undefined' && window.location.pathname !== '/') {
       window.history.pushState({}, '', '/');
     }
@@ -1426,29 +1682,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const bookOnlineConsultation = async (meta: {
     doctorId: string;
+    doctorUid?: string;
     doctorName: string;
     specialty: string;
     facilityName: string;
     city: string;
     date: string;
     time: string;
+    startTime?: string;
+    endTime?: string;
+    mode?: 'Video Telehealth' | 'In-Person';
+    patientName?: string;
     reason?: string;
   }): Promise<Appointment> => {
-    const ref = `OYO-ONL-${Date.now().toString().slice(-5)}`;
+    const mode = meta.mode === 'In-Person' ? 'In-Person' : 'Video Telehealth';
+    const ref = `${mode === 'In-Person' ? 'OYO-PHY' : 'OYO-ONL'}-${Date.now().toString().slice(-5)}`;
+    const activeProf = familyProfiles.find((p) => p.id === activeProfileId) || familyProfiles[0];
+    const resolvedPatientName =
+      meta.patientName?.trim() || activeProf?.fullName || userProfile?.displayName || 'Patient';
+    const timeLabel =
+      meta.startTime && meta.endTime
+        ? `${meta.startTime} - ${meta.endTime} WAT`
+        : meta.time;
     const notes = meta.reason?.trim()
-      ? `Online doctor consultation (included in Oyo subscription). Concern: ${meta.reason.trim()}. Doctor and patient will decide if an in-person physical exam is needed.`
-      : 'Online doctor consultation (included in HealthConnect Oyo State subscription). Doctor and patient decide together when to schedule an in-person physical exam.';
+      ? `${mode === 'In-Person' ? 'Physical in-person appointment' : 'Online doctor consultation'}. Concern: ${meta.reason.trim()}.`
+      : mode === 'In-Person'
+        ? `Physical in-person clinic examination booked at ${meta.facilityName}.`
+        : 'Online doctor consultation (included in HealthConnect Oyo State subscription). Doctor and patient decide together when to schedule an in-person physical exam.';
+
+    const matchedDoctor = allDoctors.find(
+      (d) => d.id === meta.doctorId || d.name === meta.doctorName
+    );
+    const resolvedDoctorUid = meta.doctorUid || matchedDoctor?.doctorUid;
 
     const base: Omit<Appointment, 'id' | 'patientUid'> = {
       profileId: activeProfileId || familyProfiles[0]?.id || 'default',
+      patientName: resolvedPatientName,
       doctorId: meta.doctorId,
+      ...(resolvedDoctorUid ? { doctorUid: resolvedDoctorUid } : {}),
       doctorName: meta.doctorName,
       specialty: meta.specialty,
       facilityName: meta.facilityName,
       city: meta.city || 'Ibadan',
       date: meta.date,
-      time: meta.time,
-      mode: 'Video Telehealth',
+      time: timeLabel,
+      ...(meta.startTime ? { startTime: meta.startTime } : {}),
+      ...(meta.endTime ? { endTime: meta.endTime } : {}),
+      mode,
       status: 'Confirmed',
       feeNgn: 0,
       reference: ref,
@@ -1462,21 +1742,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await writeAuditLog({
           actorUid: firebaseUser.uid,
           actorRole: userProfile.role,
-          action: 'BOOK_ONLINE_CONSULTATION',
+          action: mode === 'In-Person' ? 'BOOK_PHYSICAL_APPOINTMENT' : 'BOOK_ONLINE_CONSULTATION',
           targetPath: `appointments/${created.id}`,
-          summary: `Booked subscription-included online consultation with ${created.doctorName} (${ref}).`,
+          summary: `Booked ${mode.toLowerCase()} appointment with ${created.doctorName} on ${created.date} (${created.time}).`,
         });
       }
     } else {
       created = { ...base, id: `apt-${Date.now()}` };
       setAppointments((prev) => [created, ...prev]);
+      if (mode === 'In-Person') {
+        persistSyncedPhysicalBooking(created);
+        if (activeDemoAccount?.role === 'doctor') {
+          setDoctorAppointments((prev) => mergeAppointmentsById([created], prev));
+        }
+      }
     }
 
     setNotifications((prev) => [
       {
         id: `not-${Date.now()}`,
-        title: 'Online Doctor Consultation Confirmed',
-        detail: `${created.doctorName} · ${created.date} at ${created.time} (Included in Oyo subscription).`,
+        title:
+          mode === 'In-Person'
+            ? 'Physical Clinic Appointment Confirmed'
+            : 'Online Doctor Consultation Confirmed',
+        detail: `${created.doctorName} · ${created.date} (${created.time}) at ${created.facilityName}.`,
         time: 'Just now',
         read: false,
       },
@@ -1500,16 +1789,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ]
       .filter(Boolean)
       .join(' ');
+    const activeProf = familyProfiles.find((p) => p.id === activeProfileId) || familyProfiles[0];
+    const matchedDoctor = allDoctors.find(
+      (d) =>
+        d.id === params.parentAppointment.doctorId ||
+        d.name === params.parentAppointment.doctorName
+    );
+    const resolvedDoctorUid =
+      params.parentAppointment.doctorUid || matchedDoctor?.doctorUid;
+    const rawTimeMatch = params.time.match(/(\d{1,2}:\d{2})/);
+    const derivedStart = rawTimeMatch ? rawTimeMatch[1].padStart(5, '0') : '10:00';
+    const [sh, sm] = derivedStart.split(':').map(Number);
+    const endTotal = Math.min(23 * 60 + 45, (sh || 10) * 60 + (sm || 0) + 45);
+    const derivedEnd = `${String(Math.floor(endTotal / 60)).padStart(2, '0')}:${String(endTotal % 60).padStart(2, '0')}`;
 
     const base: Omit<Appointment, 'id' | 'patientUid'> = {
       profileId: params.parentAppointment.profileId || activeProfileId || 'default',
+      patientName:
+        params.parentAppointment.patientName ||
+        activeProf?.fullName ||
+        userProfile?.displayName ||
+        'Patient',
       doctorId: params.parentAppointment.doctorId,
+      ...(resolvedDoctorUid ? { doctorUid: resolvedDoctorUid } : {}),
       doctorName: params.parentAppointment.doctorName,
       specialty: params.parentAppointment.specialty,
       facilityName: params.facilityName,
       city: params.city || 'Ibadan',
       date: params.date,
-      time: params.time,
+      time: `${derivedStart} - ${derivedEnd} WAT`,
+      startTime: derivedStart,
+      endTime: derivedEnd,
       mode: 'In-Person',
       status: 'Confirmed',
       feeNgn: 0,
@@ -1532,6 +1842,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } else {
       created = { ...base, id: `apt-${Date.now()}` };
       setAppointments((prev) => [created, ...prev]);
+      persistSyncedPhysicalBooking(created);
+      if (activeDemoAccount?.role === 'doctor') {
+        setDoctorAppointments((prev) => mergeAppointmentsById([created], prev));
+      }
     }
 
     setNotifications((prev) => [
@@ -2415,6 +2729,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     status: 'Confirmed' | 'Completed' | 'Rescheduled' | 'Cancelled',
     clinicalNotes?: string
   ) => {
+    if (!firebaseUser && activeDemoAccount?.role === 'doctor') {
+      setDoctorAppointments((prev) =>
+        prev.map((a) =>
+          a.id === appointmentId
+            ? { ...a, status, clinicalNotes: clinicalNotes ?? a.clinicalNotes }
+            : a
+        )
+      );
+      updateSyncedPhysicalBooking(appointmentId, status, clinicalNotes);
+      return;
+    }
     if (!requireVerifiedSession() || !firebaseUser || !userProfile) return;
     await updateAppointmentStatusByClinician(appointmentId, status, clinicalNotes);
     await writeAuditLog({
@@ -2426,12 +2751,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const blockDoctorPhysicalSlot = async (input: {
+    patientName: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    facilityName: string;
+    city: string;
+    notes?: string;
+  }): Promise<Appointment> => {
+    const ref = `HC-PHY-${Date.now().toString().slice(-5)}`;
+    const timeRange = `${input.startTime} - ${input.endTime} WAT`;
+    const base: Omit<Appointment, 'id' | 'patientUid'> = {
+      profileId: 'walk-in-physical',
+      patientName: input.patientName.trim(),
+      doctorId: firebaseUser?.uid || activeDemoAccount?.id || 'doc-adewale',
+      doctorUid: firebaseUser?.uid || activeDemoAccount?.id || 'demo-doctor-portal',
+      doctorName: userProfile?.displayName || activeDemoAccount?.displayName || 'Verified Clinician',
+      specialty: userProfile?.facilityOrSpecialty || 'Clinical Consultation',
+      facilityName: input.facilityName.trim() || 'Outpatient Clinic',
+      city: input.city.trim() || userProfile?.city || 'Ibadan',
+      date: input.date,
+      time: timeRange,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      mode: 'In-Person',
+      status: 'Confirmed',
+      feeNgn: 0,
+      reference: ref,
+      clinicalNotes: input.notes?.trim() || 'Blocked physical examination slot.',
+    };
+
+    if (!firebaseUser && activeDemoAccount?.role === 'doctor') {
+      const created: Appointment = {
+        ...base,
+        id: `demo-doc-phy-${Date.now()}`,
+        patientUid: activeDemoAccount.id,
+      };
+      persistSyncedPhysicalBooking(created);
+      setDoctorAppointments((prev) => mergeAppointmentsById([created], prev));
+      return created;
+    }
+
+    if (
+      !requireVerifiedSession() ||
+      !firebaseUser ||
+      !userProfile ||
+      userProfile.role !== 'doctor'
+    ) {
+      throw new Error('Verified doctor sign-in is required to block physical appointment slots.');
+    }
+
+    const created = await createAppointmentDoc(firebaseUser.uid, base);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'doctor',
+      action: 'DOCTOR_BLOCK_PHYSICAL_SLOT',
+      targetPath: `appointments/${created.id}`,
+      summary: `Blocked physical slot for ${created.patientName || 'Patient'} on ${created.date} (${created.time}).`,
+    });
+    return created;
+  };
+
   const hospitalUpdateEmergency = async (
     requestId: string,
     stage: 'accepted' | 'dispatched' | 'resolved',
     partnerUnit?: string,
     etaMinutes?: number
   ) => {
+    if (!firebaseUser && activeDemoAccount?.role === 'hospital') {
+      setHospitalEmergencies((prev) =>
+        prev.map((emg) =>
+          emg.id === requestId
+            ? {
+                ...emg,
+                stage,
+                partnerUnit: partnerUnit || emg.partnerUnit,
+                etaMinutes: etaMinutes ?? emg.etaMinutes,
+              }
+            : emg
+        )
+      );
+      return;
+    }
     if (!requireVerifiedSession() || !firebaseUser || !userProfile) return;
     await updateEmergencyStageByHospital(requestId, firebaseUser.uid, stage, partnerUnit, etaMinutes);
     await writeAuditLog({
@@ -2443,25 +2845,309 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const loadAdminUsers = async () => {
-    if (!firebaseUser || userProfile?.role !== 'administrator') return;
-    const usersList = await adminListAllUsers();
-    setAdminUsers(usersList);
-  };
+  const isLiveVerifiedAdmin = Boolean(
+    firebaseUser &&
+      (userProfile?.role === 'administrator' ||
+        ((firebaseUser.email || '').trim().toLowerCase() === ADMIN_GMAIL_ACCOUNT &&
+          (emailVerifiedFlag || firebaseUser.emailVerified)))
+  );
 
-  const adminReviewRoleRequest = async (request: RoleRequest, decision: 'approved' | 'rejected') => {
-    if (!requireVerifiedSession() || !firebaseUser || userProfile?.role !== 'administrator') {
-      throw new Error('Administrator privileges required.');
+  const allFacilities: Facility[] = React.useMemo(() => {
+    const seen = new Set<string>();
+    const merged: Facility[] = [];
+    for (const item of [...partnerHospitals, ...DEMO_FACILITIES]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
     }
-    await reviewRoleRequestAsAdmin(request, decision);
+    return merged;
+  }, [partnerHospitals]);
+
+  const addPartnerHospital = async (input: Omit<Facility, 'id'>): Promise<Facility> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to add partner hospitals.');
+    }
+    const created = await createPartnerHospitalDoc(firebaseUser.uid, input);
     await writeAuditLog({
       actorUid: firebaseUser.uid,
       actorRole: 'administrator',
-      action: `ROLE_REQUEST_${decision.toUpperCase()}`,
-      targetPath: `roleRequests/${request.id}`,
-      summary: `${decision} ${request.requestedRole} verification for ${request.applicantName} (${request.uid}).`,
+      action: 'PARTNER_HOSPITAL_ADDED',
+      targetPath: `hospitals/${created.id}`,
+      summary: `Added verified partner facility: ${created.name} (${created.city}).`,
     });
-    await loadAdminUsers();
+    return created;
+  };
+
+  const removePartnerHospital = async (hospitalId: string): Promise<void> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to remove partner hospitals.');
+    }
+    await deletePartnerHospitalDoc(hospitalId);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'administrator',
+      action: 'PARTNER_HOSPITAL_REMOVED',
+      targetPath: `hospitals/${hospitalId}`,
+      summary: `Removed partner facility ${hospitalId} from public directory.`,
+    });
+  };
+
+  const DEFAULT_PLATFORM_SERVICES: PlatformService[] = React.useMemo(
+    () => [
+      {
+        id: 'default-svc-emergency',
+        name: '24/7 Emergency Triage & Dispatch Desk',
+        category: 'Emergency Desk',
+        description:
+          'Automated red-flag escalation and nearest-hospital GPS coordination with verified Oyo State emergency units.',
+        leadSpecialty: 'Emergency Medicine',
+        city: 'Oyo State (All)',
+        turnaroundLabel: 'Immediate Escalation',
+        botModerationEnabled: true,
+        botAutoMaskPii: true,
+        botAutoEscalateRedFlags: true,
+        active: true,
+      },
+      {
+        id: 'default-svc-telehealth',
+        name: 'General & Family Telehealth Team',
+        category: 'Care Team',
+        description:
+          'MDCN-verified doctors providing online consultations, symptom guidance, and follow-up hospital referrals.',
+        leadSpecialty: 'Family Medicine',
+        city: 'Ibadan',
+        turnaroundLabel: 'Under 30 mins',
+        botModerationEnabled: true,
+        botAutoMaskPii: true,
+        botAutoEscalateRedFlags: true,
+        active: true,
+      },
+      {
+        id: 'default-svc-chronic',
+        name: 'Hypertension & Diabetes Care Service',
+        category: 'Clinical Service',
+        description:
+          'Structured blood pressure, glucose, and wearable vitals monitoring with clinician review and medication reminders.',
+        leadSpecialty: 'Cardiology & Internal Medicine',
+        city: 'Ibadan & Ogbomoso',
+        turnaroundLabel: 'Same-Day Review',
+        botModerationEnabled: true,
+        botAutoMaskPii: true,
+        botAutoEscalateRedFlags: true,
+        active: true,
+      },
+    ],
+    []
+  );
+
+  const allDoctors: Doctor[] = React.useMemo(() => {
+    const seen = new Set<string>();
+    const merged: Doctor[] = [];
+    for (const item of [...partnerDoctors, ...hospitalDemoDoctors, ...DEMO_DOCTORS]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
+    }
+    return merged;
+  }, [partnerDoctors, hospitalDemoDoctors]);
+
+  const myHospitalDoctors: Doctor[] = React.useMemo(() => {
+    if (firebaseUser && userProfile?.role === 'hospital') {
+      return partnerDoctors.filter((d) => d.hospitalOwnerUid === firebaseUser.uid);
+    }
+    if (!firebaseUser && activeDemoAccount?.role === 'hospital') {
+      return hospitalDemoDoctors.filter((d) => d.hospitalOwnerUid === activeDemoAccount.id);
+    }
+    return [];
+  }, [firebaseUser, userProfile?.role, partnerDoctors, activeDemoAccount, hospitalDemoDoctors]);
+
+  const allPlatformServices: PlatformService[] = React.useMemo(() => {
+    const seen = new Set<string>();
+    const merged: PlatformService[] = [];
+    for (const item of [...platformServices, ...DEFAULT_PLATFORM_SERVICES]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
+    }
+    return merged;
+  }, [platformServices, DEFAULT_PLATFORM_SERVICES]);
+
+  const addPartnerDoctor = async (
+    input: Omit<Doctor, 'id' | 'rating' | 'reviewCount'>
+  ): Promise<Doctor> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to register partner doctors.');
+    }
+    const created = await createPartnerDoctorDoc(firebaseUser.uid, input);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'administrator',
+      action: 'PARTNER_DOCTOR_ADDED',
+      targetPath: `partnerDoctors/${created.id}`,
+      summary: `Registered verified partner doctor: ${created.name} (${created.specialty}).`,
+    });
+    return created;
+  };
+
+  const removePartnerDoctor = async (doctorId: string): Promise<void> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to remove partner doctors.');
+    }
+    await deletePartnerDoctorDoc(doctorId);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'administrator',
+      action: 'PARTNER_DOCTOR_REMOVED',
+      targetPath: `partnerDoctors/${doctorId}`,
+      summary: `Removed partner doctor ${doctorId} from public directory.`,
+    });
+  };
+
+  const addHospitalDoctor = async (
+    input: Omit<Doctor, 'id' | 'rating' | 'reviewCount' | 'hospitalOwnerUid'>
+  ): Promise<Doctor> => {
+    if (!firebaseUser && activeDemoAccount?.role === 'hospital') {
+      const created: Doctor = {
+        ...input,
+        id: `hosp-doc-${Date.now()}`,
+        hospitalOwnerUid: activeDemoAccount.id,
+        addedByUid: activeDemoAccount.id,
+        rating: 4.9,
+        reviewCount: 1,
+      };
+      setHospitalDemoDoctors((prev) => [created, ...prev]);
+      return created;
+    }
+
+    if (
+      !requireVerifiedSession() ||
+      !firebaseUser ||
+      !userProfile ||
+      userProfile.role !== 'hospital' ||
+      userProfile.verifiedRoleStatus !== 'active'
+    ) {
+      throw new Error('Verified hospital account sign-in is required to register doctors for your hospital.');
+    }
+
+    const created = await createPartnerDoctorDoc(firebaseUser.uid, {
+      ...input,
+      hospitalOwnerUid: firebaseUser.uid,
+    });
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'hospital',
+      action: 'HOSPITAL_DOCTOR_ADDED',
+      targetPath: `partnerDoctors/${created.id}`,
+      summary: `Hospital registered own clinician: ${created.name} (${created.specialty}).`,
+    });
+    return created;
+  };
+
+  const removeHospitalDoctor = async (doctorId: string): Promise<void> => {
+    if (!firebaseUser && activeDemoAccount?.role === 'hospital') {
+      setHospitalDemoDoctors((prev) =>
+        prev.filter((d) => !(d.id === doctorId && d.hospitalOwnerUid === activeDemoAccount.id))
+      );
+      return;
+    }
+
+    if (
+      !requireVerifiedSession() ||
+      !firebaseUser ||
+      !userProfile ||
+      userProfile.role !== 'hospital' ||
+      userProfile.verifiedRoleStatus !== 'active'
+    ) {
+      throw new Error('Verified hospital account sign-in is required to remove your hospital doctors.');
+    }
+
+    const owned = partnerDoctors.find(
+      (d) => d.id === doctorId && d.hospitalOwnerUid === firebaseUser.uid
+    );
+    if (!owned) {
+      throw new Error('You can only remove doctors registered under your own hospital account.');
+    }
+
+    await deletePartnerDoctorDoc(doctorId);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'hospital',
+      action: 'HOSPITAL_DOCTOR_REMOVED',
+      targetPath: `partnerDoctors/${doctorId}`,
+      summary: `Hospital removed own clinician ${owned.name} (${doctorId}).`,
+    });
+  };
+
+  const addPlatformService = async (
+    input: Omit<PlatformService, 'id' | 'addedByUid' | 'createdAt'>
+  ): Promise<PlatformService> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to create website teams/services.');
+    }
+    const created = await createPlatformServiceDoc(firebaseUser.uid, input);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'administrator',
+      action: 'PLATFORM_SERVICE_ADDED',
+      targetPath: `platformServices/${created.id}`,
+      summary: `Created website ${created.category}: ${created.name} (Sentinel Bot: ${created.botModerationEnabled ? 'Active' : 'Paused'}).`,
+    });
+    return created;
+  };
+
+  const togglePlatformServiceBot = async (
+    serviceId: string,
+    updates: Partial<
+      Pick<
+        PlatformService,
+        'botModerationEnabled' | 'botAutoMaskPii' | 'botAutoEscalateRedFlags' | 'active'
+      >
+    >
+  ): Promise<void> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to update bot service controls.');
+    }
+    await updatePlatformServiceDoc(serviceId, updates);
+  };
+
+  const removePlatformService = async (serviceId: string): Promise<void> => {
+    if (!requireVerifiedSession() || !firebaseUser || !isLiveVerifiedAdmin) {
+      throw new Error('Verified administrator sign-in is required to remove website teams/services.');
+    }
+    await deletePlatformServiceDoc(serviceId);
+    await writeAuditLog({
+      actorUid: firebaseUser.uid,
+      actorRole: 'administrator',
+      action: 'PLATFORM_SERVICE_REMOVED',
+      targetPath: `platformServices/${serviceId}`,
+      summary: `Removed platform service ${serviceId}.`,
+    });
+  };
+
+  const recordChatModerationEvent = async (
+    input: Omit<ChatModerationEvent, 'id' | 'actorUid' | 'createdAt'>
+  ): Promise<void> => {
+    const localEvent: ChatModerationEvent = {
+      id: `cmod-local-${Date.now()}`,
+      actorUid: firebaseUser?.uid || activeDemoAccount?.id || 'guest-session',
+      flagType: input.flagType,
+      detectedCategories: input.detectedCategories,
+      mode: input.mode,
+      maskedExcerpt: input.maskedExcerpt,
+      botAction: input.botAction,
+      serviceName: input.serviceName,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Always keep local moderation preview updated in browser session for demo/testing
+    setChatModerationEvents((prev) => [localEvent, ...prev.slice(0, 49)]);
+
+    if (firebaseUser && (emailVerifiedFlag || firebaseUser.emailVerified)) {
+      await createChatModerationEventDoc(firebaseUser.uid, input).catch(() => undefined);
+    }
   };
 
   const addRehabSession = async (input: {
@@ -2833,6 +3519,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismissOnboardingPrompt = () => setOnboardingDismissed(true);
 
+  const isAdminBootstrapUser = Boolean(
+    firebaseUser &&
+      (firebaseUser.email || '').trim().toLowerCase() === ADMIN_GMAIL_ACCOUNT &&
+      (emailVerifiedFlag || Boolean(firebaseUser.emailVerified))
+  );
+
   const userSummary: SessionUserSummary = firebaseUser
     ? {
         uid: firebaseUser.uid,
@@ -2841,19 +3533,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         city: userProfile?.city || 'Ibadan',
         signedIn: true,
         emailVerified: emailVerifiedFlag || Boolean(firebaseUser.emailVerified),
-        role: userProfile?.role || 'patient',
-        verifiedRoleStatus: userProfile?.verifiedRoleStatus || 'active',
+        role: isAdminBootstrapUser ? 'administrator' : userProfile?.role || 'patient',
+        verifiedRoleStatus: isAdminBootstrapUser
+          ? 'active'
+          : userProfile?.verifiedRoleStatus || 'active',
       }
-    : {
-        uid: null,
-        name: 'Guest Preview (Demo)',
-        email: '',
-        city: 'Ibadan',
-        signedIn: false,
-        emailVerified: false,
-        role: 'patient',
-        verifiedRoleStatus: 'active',
-      };
+    : activeDemoAccount
+      ? {
+          uid: activeDemoAccount.id,
+          name: activeDemoAccount.displayName,
+          email: activeDemoAccount.email,
+          city: activeDemoAccount.city,
+          signedIn: true,
+          emailVerified: true,
+          role: activeDemoAccount.role,
+          verifiedRoleStatus: 'active',
+        }
+      : {
+          uid: null,
+          name: 'Guest Preview (Demo)',
+          email: '',
+          city: 'Ibadan',
+          signedIn: false,
+          emailVerified: false,
+          role: 'patient',
+          verifiedRoleStatus: 'active',
+        };
 
   return (
     <AppContext.Provider
@@ -2871,9 +3576,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         privateInfo,
         user: userSummary,
         isGuestDemo: !firebaseUser,
+        isDemoSandbox: Boolean(!firebaseUser && activeDemoAccount),
+        activeDemoAccount,
+        preferredDashboardTab,
+        clearPreferredDashboardTab: () => setPreferredDashboardTab(null),
         integrationStatus,
         googleSignInPending,
         signInWithGoogle,
+        signInAsDemoAccount,
         signInWithEmail,
         signUpWithEmail,
         needsOnboardingPrompt,
@@ -2961,14 +3671,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         doctorSharedGlucose,
         doctorSharedDocs,
         updateAppointmentClinician,
+        blockDoctorPhysicalSlot,
         hospitalAppointments,
         hospitalEmergencies,
         hospitalUpdateEmergency,
-        adminRoleRequests,
-        adminAuditLogs,
-        adminUsers,
-        loadAdminUsers,
-        adminReviewRoleRequest,
+        partnerHospitals,
+        allFacilities,
+        addPartnerHospital,
+        removePartnerHospital,
+        partnerDoctors,
+        allDoctors,
+        myHospitalDoctors,
+        addPartnerDoctor,
+        removePartnerDoctor,
+        addHospitalDoctor,
+        removeHospitalDoctor,
+        platformServices,
+        allPlatformServices,
+        addPlatformService,
+        togglePlatformServiceBot,
+        removePlatformService,
+        chatModerationEvents,
+        recordChatModerationEvent,
       }}
     >
       {children}

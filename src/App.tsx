@@ -136,7 +136,8 @@ function MainShell() {
     route === '/register' ||
     route === '/payment-response' ||
     route === '/ai-assistant' ||
-    route === '/emergency';
+    route === '/emergency' ||
+    route === '/about';
 
   const renderPage = () => {
     if (!user.signedIn && !isPublicRoute) {

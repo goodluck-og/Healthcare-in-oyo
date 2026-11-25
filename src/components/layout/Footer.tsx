@@ -47,7 +47,12 @@ export function Footer() {
               </li>
               <li>
                 <button type="button" onClick={() => navigate('/payments')} className="hover:text-white transition-colors cursor-pointer">
-                  Payments & Receipts
+                  Payments &amp; Receipts
+                </button>
+              </li>
+              <li>
+                <button type="button" onClick={() => navigate('/about', 'project-documentation')} className="text-[#FFB585] hover:text-white font-semibold transition-colors cursor-pointer">
+                  Project Docs &amp; Google Drive
                 </button>
               </li>
             </ul>

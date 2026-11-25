@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createApiApp } from './server/createApp.ts';
@@ -12,6 +13,7 @@ const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   const app = createApiApp();
+  const httpServer = http.createServer(app);
   const isProd = process.env.NODE_ENV === 'production';
 
   // Allow Firebase Auth Google sign-in popups to communicate with window.opener reliably.
@@ -38,7 +40,10 @@ async function startServer() {
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -55,7 +60,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`HealthConnect Africa server listening on http://localhost:${PORT}`);
   });
 }

@@ -53,6 +53,7 @@ import { SpecialCareHub } from '../components/wellness/SpecialCareHub';
 import { HealthTimeline } from '../components/timeline/HealthTimeline';
 import { NetflixFamilyHub } from '../components/family/NetflixFamilyHub';
 import { PersonalisedDashboardHub } from '../components/dashboard/PersonalisedDashboardHub';
+import { VaccineScheduleTracker } from '../components/dashboard/VaccineScheduleTracker';
 import { SmartwatchHub } from '../components/monitoring/SmartwatchHub';
 import { EmergencyMedicalQrCard } from '../components/emergency/EmergencyMedicalQrCard';
 import { HealthOnboardingModal } from '../components/onboarding/HealthOnboardingModal';
@@ -149,9 +150,14 @@ export function DashboardPage() {
   const {
     user,
     isGuestDemo,
+    isDemoSandbox,
+    activeDemoAccount,
+    preferredDashboardTab,
+    clearPreferredDashboardTab,
     authLoading,
     googleSignInPending,
     signInWithGoogle,
+    signOut,
     navigate,
     familyProfiles,
     activeProfileId,
@@ -194,6 +200,14 @@ export function DashboardPage() {
     () => buildPersonalisedDashboardPlan(activeProfile),
     [activeProfile]
   );
+
+  // Honor preferred landing tab (e.g. Admin Console for administrator, Doctor/Hospital Portal, Senior Watch)
+  React.useEffect(() => {
+    if (preferredDashboardTab) {
+      setTab(preferredDashboardTab);
+      clearPreferredDashboardTab();
+    }
+  }, [preferredDashboardTab, clearPreferredDashboardTab]);
 
   // Enforce child safety: never stay on Women's Health tab if active profile is a child (0-12)
   React.useEffect(() => {
@@ -247,16 +261,37 @@ export function DashboardPage() {
   };
 
   const filteredNavItems = useMemo(() => {
+    const labeled = NAV_ITEMS.map((item) => {
+      if (item.id === 'portals') {
+        if (user.role === 'administrator') return { ...item, label: 'Admin Console' };
+        if (user.role === 'doctor') {
+          return {
+            ...item,
+            label: 'Doctor Calendar & Portal',
+            keywords: 'calendar physical consultations schedule time slots doctor portal',
+          };
+        }
+        if (user.role === 'hospital') return { ...item, label: 'Hospital EMS Portal' };
+      }
+      return item;
+    });
+    const ordered =
+      user.role === 'administrator' || user.role === 'doctor' || user.role === 'hospital'
+        ? [
+            ...labeled.filter((i) => i.id === 'portals'),
+            ...labeled.filter((i) => i.id !== 'portals'),
+          ]
+        : labeled;
     const safeItems = personalisationPlan.hideAdultReproductiveTabs
-      ? NAV_ITEMS.filter((item) => item.id !== 'womens')
-      : NAV_ITEMS;
+      ? ordered.filter((item) => item.id !== 'womens')
+      : ordered;
     const q = sidebarSearch.trim().toLowerCase();
     if (!q) return safeItems;
     return safeItems.filter(
       (item) =>
         item.label.toLowerCase().includes(q) || item.keywords.toLowerCase().includes(q)
     );
-  }, [sidebarSearch, personalisationPlan.hideAdultReproductiveTabs]);
+  }, [sidebarSearch, personalisationPlan.hideAdultReproductiveTabs, user.role]);
 
   const vitalsChartData = useMemo(() => {
     const bpSorted = [...profileBp]
@@ -331,13 +366,61 @@ export function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#0B0A33] text-[#F4F5FC] py-6 sm:py-8">
       <div className="max-w-[1460px] mx-auto px-4 sm:px-6 lg:px-8 space-y-5">
-        {/* Guest vs Email Verification Status Banner */}
-        {isGuestDemo ? (
+        {/* Admin Verified Banner, Demo Sandbox Banner, or Guest Preview Banner */}
+        {user.role === 'administrator' && !isGuestDemo ? (
+          <div className="rounded-2xl bg-emerald-500/15 border border-emerald-400/35 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <p className="font-bold text-sm text-emerald-100">
+                Provider Registry &amp; Sentinel Bot Console Active ({user.email})
+              </p>
+              <p className="text-emerald-200/90 mt-0.5">
+                Verified via Google / Firebase Auth. Register partner doctors and hospitals, manage website care teams &amp; services, and monitor the automated Sentinel Moderator Bot (read-only). Client/patient accounts, private contacts, medical records, and payments remain strictly inaccessible.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => selectDashboardTab('portals')}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shrink-0 cursor-pointer"
+            >
+              Open Provider &amp; Bot Console
+            </button>
+          </div>
+        ) : isDemoSandbox && activeDemoAccount ? (
+          <div className="rounded-2xl bg-[#1A1862] border border-[#FFB585]/35 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <p className="font-bold text-sm text-white">
+                Demo Sandbox Active · {activeDemoAccount.label}
+              </p>
+              <p className="text-[#C7C8E6] mt-0.5">
+                {activeDemoAccount.description} Changes stay in browser memory and never touch live Firestore patient records.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  void signOut().then(() => navigate('/login'));
+                }}
+                className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold cursor-pointer"
+              >
+                Switch Demo Account
+              </button>
+              <button
+                type="button"
+                disabled={googleSignInPending}
+                onClick={() => void signInWithGoogle()}
+                className="px-3.5 py-2 rounded-xl bg-[#E8702A] hover:bg-[#CF5E1D] disabled:opacity-60 text-white font-semibold cursor-pointer"
+              >
+                {googleSignInPending ? 'Signing in...' : 'Real Google Sign-In'}
+              </button>
+            </div>
+          </div>
+        ) : isGuestDemo ? (
           <div className="rounded-2xl bg-[#161554] border border-white/12 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div>
               <p className="font-bold text-sm text-white">Guest Demonstration Preview</p>
               <p className="text-[#C7C8E6] mt-0.5">
-                Viewing sample Oyo State clinical data in browser memory. Sign in to persist your family profiles, online consultations, rehab sessions, private cycle logs, and subscription receipts in Cloud Firestore.
+                Viewing sample clinical data in browser memory. Sign in to persist your family profiles, online consultations, rehab sessions, private cycle logs, and subscription receipts in Cloud Firestore.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -354,7 +437,7 @@ export function DashboardPage() {
                 onClick={() => navigate('/login')}
                 className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold cursor-pointer"
               >
-                Email Login
+                Demo / Email Login
               </button>
             </div>
           </div>
@@ -712,7 +795,12 @@ export function DashboardPage() {
             )}
             {tab === 'timeline' && <HealthTimeline />}
             {tab === 'rehab' && <RehabilitationStudio />}
-            {tab === 'care' && <SpecialCareHub />}
+            {tab === 'care' && (
+              <div className="space-y-6">
+                <VaccineScheduleTracker />
+                <SpecialCareHub />
+              </div>
+            )}
 
             {/* Dedicated LAB RESULTS Tab with direct AI Test Review action */}
             {tab === 'labs' && (
@@ -1113,6 +1201,12 @@ export function DashboardPage() {
                         </div>
                       )}
                     </section>
+
+                    {/* Age-Based Visual Vaccine Schedule Progress & Timeline */}
+                    <VaccineScheduleTracker
+                      compact
+                      onOpenFullCareHub={() => setTab('care')}
+                    />
 
                     {/* Personal Health Timeline Preview */}
                     <HealthTimeline limit={5} onViewAll={() => setTab('timeline')} />

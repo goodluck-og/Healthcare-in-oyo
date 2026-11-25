@@ -102,16 +102,24 @@ describe('HealthConnect — Verified DOID Ontology & ChatGPT-Style Interactive I
     expect(bp.some((e) => e.entry.doid === 'DOID:10763')).toBe(true);
   });
 
-  it('asks ChatGPT-style clarifying follow-up questions with quick-reply chips when user says "I feel sick" offline', async () => {
+  it('asks ChatGPT-style clarifying follow-up questions with quick-reply chips when user says "I feel sick" or "I am sick" (offline and online)', async () => {
     const intake = buildInteractiveLocalIntake({
-      prompt: 'I feel sick',
-      conversationHistory: [],
+      prompt: 'I am sick',
+      conversationHistory: [
+        { role: 'user', content: 'Tell me about malaria prevention' },
+        { role: 'assistant', content: 'Use treated nets and test early.' },
+      ],
     });
     expect(intake.handled).toBe(true);
-    expect(intake.quickReplies.length).toBeGreaterThanOrEqual(3);
+    expect(intake.intakeStage).toBe('triage-start');
+    expect(intake.reply.toLowerCase()).toContain('what are you feeling');
+    expect(intake.reply.toLowerCase()).toContain('symptoms');
+    expect(intake.reply.toLowerCase()).toContain('rest');
+    expect(intake.quickReplies.length).toBeGreaterThanOrEqual(4);
 
-    const response = await routeHybridHealthQuery({
-      prompt: 'I feel sick',
+    // Offline / local-only path
+    const offlineResponse = await routeHybridHealthQuery({
+      prompt: 'I am sick',
       mode: 'General Symptom Guidance',
       routingPreference: 'local-only',
       cloudProvider: 'gemini',
@@ -124,8 +132,29 @@ describe('HealthConnect — Verified DOID Ontology & ChatGPT-Style Interactive I
       serverCloudConfigured: false,
     });
 
-    expect(response.quickReplies && response.quickReplies.length).toBeGreaterThan(0);
-    expect(response.haltEducationalDialogue).not.toBe(true);
+    expect(offlineResponse.quickReplies && offlineResponse.quickReplies.length).toBeGreaterThan(0);
+    expect(offlineResponse.reply.toLowerCase()).toContain('what are you feeling');
+    expect(offlineResponse.haltEducationalDialogue).not.toBe(true);
+
+    // Online Smart Hybrid path should ALSO immediately ask symptoms & rest questions
+    const onlineResponse = await routeHybridHealthQuery({
+      prompt: 'I am sick',
+      mode: 'General Symptom Guidance',
+      routingPreference: 'smart-hybrid',
+      cloudProvider: 'gemini',
+      openRouterModel: 'openai/gpt-4o',
+      conversationHistory: [],
+      patientContext: '',
+      includeProfileContext: false,
+      cloudConsentGranted: false,
+      isOnline: true,
+      serverCloudConfigured: true,
+    });
+
+    expect(onlineResponse.intakeStage).toBe('triage-start');
+    expect(onlineResponse.reply.toLowerCase()).toContain('what are you feeling');
+    expect(onlineResponse.reply.toLowerCase()).toContain('rest');
+    expect(onlineResponse.quickReplies && onlineResponse.quickReplies.length).toBeGreaterThanOrEqual(4);
   });
 
   it('provides offline photo first-aid triage when an injury image is attached offline, while preserving red-flag middleware', async () => {
@@ -275,3 +304,184 @@ describe('HealthConnect Backend Routes — Multimodal Red-Flag & openFDA Validat
     expect(res.status).toBe(400);
   });
 });
+
+describe('HealthConnect — Demo Sandbox Accounts & Admin Security Boundary', () => {
+  it('provides 5 working isolated demo accounts and never allows demo accounts to hold administrator role', async () => {
+    const { DEMO_SANDBOX_ACCOUNTS, matchDemoSandboxCredentials, ADMIN_GMAIL_ACCOUNT } = await import(
+      '../src/data/demoAccounts'
+    );
+
+    expect(ADMIN_GMAIL_ACCOUNT).toBe('amesinlolagoodluck@gmail.com');
+    expect(DEMO_SANDBOX_ACCOUNTS.length).toBe(5);
+
+    for (const acc of DEMO_SANDBOX_ACCOUNTS) {
+      expect(acc.role).not.toBe('administrator');
+      const matched = matchDemoSandboxCredentials(acc.email, acc.password);
+      expect(matched?.id).toBe(acc.id);
+      expect(matchDemoSandboxCredentials(acc.email, 'WrongPassword123!')).toBeNull();
+    }
+
+    // Admin Gmail must NEVER authenticate through demo sandbox credentials
+    expect(matchDemoSandboxCredentials(ADMIN_GMAIL_ACCOUNT, 'HealthDemo2026!')).toBeNull();
+
+    // Child demo profile must enforce Guardian Child Safety Mode
+    const childAcc = DEMO_SANDBOX_ACCOUNTS.find((a) => a.id === 'demo-child-guardian');
+    expect(childAcc).toBeDefined();
+    const childPlan = buildPersonalisedDashboardPlan(childAcc!.profiles[0]);
+    expect(childPlan.ageInfo.isGuardianManaged).toBe(true);
+    expect(childPlan.hideAdultReproductiveTabs).toBe(true);
+  });
+});
+
+describe('HealthConnect — Real-Time Chat Regex PII Filter (Phones, Accounts, Coordinates)', () => {
+  it('detects and masks international and Nigerian phone numbers while preserving emergency shortcodes', async () => {
+    const { filterAndMaskChatPii, MASK_TOKENS } = await import('../shared/chatPiiFilter');
+
+    const res1 = filterAndMaskChatPii('Call me on +234 803 555 0199 or 08091234567 for follow-up.');
+    expect(res1.hasSensitiveData).toBe(true);
+    expect(res1.detectedCategories).toContain('phone');
+    expect(res1.maskedText).not.toContain('803');
+    expect(res1.maskedText).not.toContain('08091234567');
+    expect(res1.maskedText).toContain(MASK_TOKENS.phone);
+
+    const res2 = filterAndMaskChatPii('My US number is (415) 555-0192.');
+    expect(res2.hasSensitiveData).toBe(true);
+    expect(res2.maskedText).toContain(MASK_TOKENS.phone);
+  });
+
+  it('detects and masks NUBAN bank account numbers, IBANs, and card numbers', async () => {
+    const { filterAndMaskChatPii, MASK_TOKENS } = await import('../shared/chatPiiFilter');
+
+    const resAcct = filterAndMaskChatPii('Send transfer to account number 0123456789 at GTBank.');
+    expect(resAcct.hasSensitiveData).toBe(true);
+    expect(resAcct.detectedCategories).toContain('account');
+    expect(resAcct.maskedText).not.toContain('0123456789');
+    expect(resAcct.maskedText).toContain(MASK_TOKENS.account);
+
+    const resCard = filterAndMaskChatPii('Card 4532-1122-3344-5566 and IBAN GB29NWBK60161331926819');
+    expect(resCard.hasSensitiveData).toBe(true);
+    expect(resCard.maskedText).not.toContain('4532');
+    expect(resCard.maskedText).not.toContain('GB29NWBK');
+    expect(resCard.maskedText).toContain(MASK_TOKENS.account);
+  });
+
+  it('detects and masks decimal GPS coordinates, DMS coordinates, and Google Maps pins', async () => {
+    const { filterAndMaskChatPii, MASK_TOKENS } = await import('../shared/chatPiiFilter');
+
+    const resDec = filterAndMaskChatPii('I am at 7.4190, 3.9110 near Bodija.');
+    expect(resDec.hasSensitiveData).toBe(true);
+    expect(resDec.detectedCategories).toContain('coordinates');
+    expect(resDec.maskedText).not.toContain('7.4190');
+    expect(resDec.maskedText).toContain(MASK_TOKENS.coordinates);
+
+    const resMap = filterAndMaskChatPii(
+      'Location pin https://www.google.com/maps?q=6.5244,3.3792 and lat: 7.402, lng: 3.902'
+    );
+    expect(resMap.hasSensitiveData).toBe(true);
+    expect(resMap.maskedText).not.toContain('6.5244');
+    expect(resMap.maskedText).not.toContain('7.402');
+
+    const resDms = filterAndMaskChatPii(`Coordinates: 7°25'08"N 3°54'39"E`);
+    expect(resDms.hasSensitiveData).toBe(true);
+    expect(resDms.maskedText).toContain(MASK_TOKENS.coordinates);
+  });
+
+  it('preserves legitimate clinical measurements without false positives', async () => {
+    const { filterAndMaskChatPii } = await import('../shared/chatPiiFilter');
+
+    const clinical =
+      'My BP is 120/80 mmHg, heart rate 76 bpm, temp 37.5°C, glucose 184 mg/dL, SpO2 98%, should I call 112?';
+    const res = filterAndMaskChatPii(clinical);
+    expect(res.hasSensitiveData).toBe(false);
+    expect(res.detectedCategories).toEqual([]);
+    expect(res.maskedText).toBe(clinical);
+  });
+});
+
+describe('HealthConnect Sentinel Moderator Bot (Automated Policy & Service Governance)', () => {
+  const sampleServices = [
+    {
+      id: 'svc-pediatric',
+      name: 'Maternal & Pediatric Care Desk',
+      category: 'Care Team' as const,
+      leadSpecialty: 'Pediatrics & Child Fever Triage',
+      botModerationEnabled: true,
+      botAutoMaskPii: true,
+      botAutoEscalateRedFlags: true,
+      active: true,
+    },
+    {
+      id: 'svc-emergency',
+      name: '24/7 Emergency Dispatch Team',
+      category: 'Emergency Desk' as const,
+      leadSpecialty: 'Trauma & Urgent Care',
+      botModerationEnabled: true,
+      botAutoMaskPii: true,
+      botAutoEscalateRedFlags: true,
+      active: true,
+    },
+    {
+      id: 'svc-paused',
+      name: 'Paused Legacy Desk',
+      category: 'Clinical Service' as const,
+      leadSpecialty: 'Diagnostics',
+      botModerationEnabled: false,
+      botAutoMaskPii: true,
+      botAutoEscalateRedFlags: true,
+      active: false,
+    },
+  ];
+
+  it('automatically masks PII and routes matching health queries to an active bot-monitored care team', async () => {
+    const { evaluateModeratorBot } = await import('../shared/moderatorBot');
+    const decision = evaluateModeratorBot(
+      'My child has a fever, call +234 803 555 0199 or send to account number 0123456789 at 7.4190, 3.9110.',
+      sampleServices
+    );
+    expect(decision.action).toBe('pii_masked');
+    expect(decision.piiCategories).toEqual(expect.arrayContaining(['phone', 'account', 'coordinates']));
+    expect(decision.maskedText).not.toContain('803');
+    expect(decision.maskedText).not.toContain('0123456789');
+    expect(decision.maskedText).not.toContain('7.4190');
+    expect(decision.routedServiceName).toBe('Maternal & Pediatric Care Desk');
+    expect(decision.botNotice).toBeTruthy();
+  });
+
+  it('escalates emergency red flags immediately while masking any embedded PII', async () => {
+    const { evaluateModeratorBot } = await import('../shared/moderatorBot');
+    const decision = evaluateModeratorBot(
+      'Patient has severe chest pain and difficulty breathing at 6.5244, 3.3792',
+      sampleServices
+    );
+    expect(decision.action).toBe('red_flag_escalated');
+    expect(decision.redFlagKeywords.length).toBeGreaterThan(0);
+    expect(decision.piiCategories).toContain('coordinates');
+    expect(decision.maskedText).not.toContain('6.5244');
+  });
+
+  it('flags off-platform contact or direct bank-transfer solicitation policies', async () => {
+    const { evaluateModeratorBot } = await import('../shared/moderatorBot');
+    const decision = evaluateModeratorBot(
+      'Please DM me on WhatsApp and send money to my personal account.',
+      sampleServices
+    );
+    expect(decision.action).toBe('policy_warning');
+    expect(decision.policyFlags.length).toBeGreaterThan(0);
+    expect(decision.botNotice).toBeTruthy();
+  });
+
+  it('allows clean clinical questions without false positives', async () => {
+    const { evaluateModeratorBot } = await import('../shared/moderatorBot');
+    const decision = evaluateModeratorBot(
+      'What are normal fasting blood sugar levels and how should I prepare for a malaria rapid test?',
+      sampleServices
+    );
+    expect(decision.action).toBe('allowed');
+    expect(decision.piiCategories).toEqual([]);
+    expect(decision.redFlagKeywords).toEqual([]);
+    expect(decision.policyFlags).toEqual([]);
+    expect(decision.botNotice).toBeNull();
+  });
+});
+
+

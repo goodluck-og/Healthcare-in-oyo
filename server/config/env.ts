@@ -19,6 +19,9 @@ export interface ServerIntegrationConfig {
   interswitchWebhookSecret: string;
   interswitchUsingPublicSandboxDefaults: boolean;
   smsProviderKey: string;
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  twilioFromNumber: string;
   googleMapsApiKey: string;
   appUrl: string;
   firebaseProjectId: string;
@@ -98,6 +101,9 @@ export function getServerConfig(): ServerIntegrationConfig {
     interswitchWebhookSecret: normalizeSecret(process.env.INTERSWITCH_WEBHOOK_SECRET),
     interswitchUsingPublicSandboxDefaults,
     smsProviderKey: normalizeSecret(process.env.TERMII_API_KEY || process.env.TWILIO_ACCOUNT_SID),
+    twilioAccountSid: normalizeSecret(process.env.TWILIO_ACCOUNT_SID),
+    twilioAuthToken: normalizeSecret(process.env.TWILIO_AUTH_TOKEN),
+    twilioFromNumber: normalizeSecret(process.env.TWILIO_FROM_NUMBER),
     googleMapsApiKey: normalizeSecret(process.env.VITE_GOOGLE_MAPS_API_KEY),
     appUrl,
     firebaseProjectId: readFirebaseProjectId(),
@@ -136,6 +142,9 @@ export function getPublicIntegrationStatus() {
     interswitchWebhookConfigured: Boolean(cfg.interswitchWebhookSecret),
     interswitchMissingCount: missingInterswitch.length,
     smsConfigured: Boolean(cfg.smsProviderKey),
+    twilioConfigured: Boolean(
+      cfg.twilioAccountSid && cfg.twilioAuthToken && cfg.twilioFromNumber
+    ),
     firebaseProjectId: cfg.firebaseProjectId,
   };
 }

@@ -2,7 +2,6 @@ import { Router, type RequestHandler } from 'express';
 import { type AuthenticatedRequest } from '../middleware/auth.ts';
 import { recordServerAudit } from '../services/auditService.ts';
 import {
-  getAdminPaymentDashboardSummary,
   initializeInterswitchPayment,
   initializeInterswitchWebCheckout,
   processInterswitchWebhook,
@@ -194,7 +193,9 @@ export function createPaymentRouter(options: PaymentRouterOptions) {
   );
 
   /**
-   * Administrator-Only Payment Management Endpoint
+   * Disabled for strict least-privilege: Administrators can ONLY add/remove
+   * partner hospitals and monitor masked chat safety alerts — never inspect
+   * other users' accounts or payment records.
    * GET /api/admin/payments
    */
   router.get(
@@ -202,15 +203,17 @@ export function createPaymentRouter(options: PaymentRouterOptions) {
     ...payGuard,
     requireAdmin,
     (req: AuthenticatedRequest, res) => {
-      const data = getAdminPaymentDashboardSummary();
       recordServerAudit({
         actorUid: req.authUser!.uid,
-        action: 'ADMIN_PAYMENTS_VIEW',
+        action: 'ADMIN_PAYMENTS_BLOCKED_PRIVACY',
         endpoint: '/api/admin/payments',
-        statusCode: 200,
-        summary: `Administrator inspected payment ledger (${data.summary.totalTransactions} records).`,
+        statusCode: 403,
+        summary: 'Blocked administrator access to user payment ledger under strict least-privilege privacy policy.',
       });
-      res.json(data);
+      res.status(403).json({
+        error:
+          'Access denied. Administrator permissions are strictly limited to partner hospital management and read-only chat moderation; user payment records are private.',
+      });
     }
   );
 

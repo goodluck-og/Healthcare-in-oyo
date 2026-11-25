@@ -338,67 +338,66 @@ export async function verifyInterswitchReferenceApi(
   return data;
 }
 
-export interface AdminPaymentRecordDto {
-  id: string;
-  order_id: string;
-  transaction_reference: string;
-  merchant_code: string;
-  amount: number;
-  amount_ngn: number;
-  currency: '566';
-  payment_provider: 'interswitch';
-  environment: 'sandbox' | 'production';
-  payment_status: 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'AMOUNT_MISMATCH' | 'UNCONFIGURED';
-  payment_method: string;
-  customer_uid: string;
-  customer_name: string;
-  customer_email: string;
-  customer_phone?: string;
-  description: string;
-  category: string;
-  gateway_response_code?: string;
-  gateway_response_description?: string;
-  created_at: string;
-  updated_at: string;
-  verified_at?: string;
-}
-
-export interface AdminWebhookEventDto {
-  id: string;
-  event_id: string;
-  event_type: string;
-  transaction_reference: string;
-  processing_status: 'PROCESSED' | 'DUPLICATE_IGNORED' | 'VERIFICATION_PENDING' | 'FAILED';
-  received_at: string;
-  processed_at?: string;
-}
-
-export interface AdminPaymentsDashboardResponse {
-  environment: 'sandbox' | 'production';
-  configured: boolean;
-  missingCredentials: string[];
-  webhookSecretConfigured: boolean;
-  summary: {
-    totalTransactions: number;
-    successfulTransactions: number;
-    failedTransactions: number;
-    pendingTransactions: number;
-    totalVerifiedVolumeNgn: number;
-  };
-  payments: AdminPaymentRecordDto[];
-  webhookEvents: AdminWebhookEventDto[];
+export interface EmergencySmsRecipientResult {
+  name: string;
+  to: string;
+  sent: boolean;
+  sid?: string;
+  status?: string;
   error?: string;
 }
 
-export async function fetchAdminPaymentsApi(): Promise<AdminPaymentsDashboardResponse> {
+export interface EmergencySmsDispatchResponse {
+  ok: boolean;
+  configured: boolean;
+  provider?: 'twilio';
+  missingCredentials?: string[];
+  messageBody?: string;
+  dispatchedCount: number;
+  failedCount: number;
+  results: EmergencySmsRecipientResult[];
+  message: string;
+  error?: string;
+  requiresAuth?: boolean;
+}
+
+export async function dispatchEmergencySmsApi(payload: {
+  patientName: string;
+  emergencyType: 'SOS Medical Triage' | 'Ambulance Dispatch Request' | 'Watch Critical Alert';
+  locationLabel: string;
+  coordinates: { lat: number; lng: number } | null;
+  bloodGroup?: string;
+  allergies?: string;
+  notes?: string;
+  contacts: Array<{ id?: string; name: string; phone: string }>;
+}): Promise<EmergencySmsDispatchResponse> {
   const headers = await getAuthHeaders();
-  const res = await fetch('/api/admin/payments', {
-    method: 'GET',
+  const res = await fetch('/api/emergency/sms/dispatch', {
+    method: 'POST',
     headers,
+    body: JSON.stringify(payload),
   });
-  const data = await safeReadJson<AdminPaymentsDashboardResponse>(res);
-  if (!res.ok) {
-    throw new Error(data.error || `Unable to load admin payments (${res.status})`);
+  const data = await safeReadJson<EmergencySmsDispatchResponse>(res);
+  if (res.status === 401) {
+    return {
+      ok: false,
+      configured: true,
+      dispatchedCount: 0,
+      failedCount: 0,
+      results: [],
+      requiresAuth: true,
+      message:
+        data.error ||
+        'Sign in to your HealthConnect account to dispatch automated Twilio SMS alerts from the server, or use the direct device SMS button below.',
+    };
+  }
+  if (res.status === 503 && data.configured === false) {
+    return data;
+  }
+  if (!res.ok && res.status !== 502) {
+    throw new Error(
+      data.error || data.message || `Emergency SMS request failed (${res.status})`
+    );
   }
   return data;
 }

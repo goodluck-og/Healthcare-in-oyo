@@ -8,8 +8,6 @@ import {
   AUTHORITATIVE_ORDER_CATALOG,
   getPaymentByReference,
   getWebhookEventByEventId,
-  listAllPaymentRecords,
-  listAllWebhookEvents,
   savePaymentRecord,
   saveWebhookEvent,
   updatePaymentRecord,
@@ -726,39 +724,5 @@ export async function processInterswitchWebhook(
     eventId,
     processingStatus,
     message: 'Webhook signature verified and event recorded.',
-  };
-}
-
-export function getAdminPaymentDashboardSummary() {
-  const cfg = getServerConfig();
-  const payments = listAllPaymentRecords();
-  const webhookEvents = listAllWebhookEvents();
-  const missingCredentials = getMissingInterswitchCredentials(cfg);
-
-  const summary = {
-    totalTransactions: payments.length,
-    successfulTransactions: payments.filter((p) => p.payment_status === 'PAID').length,
-    failedTransactions: payments.filter(
-      (p) =>
-        p.payment_status === 'FAILED' ||
-        p.payment_status === 'CANCELLED' ||
-        p.payment_status === 'AMOUNT_MISMATCH'
-    ).length,
-    pendingTransactions: payments.filter(
-      (p) => p.payment_status === 'PENDING' || p.payment_status === 'UNCONFIGURED'
-    ).length,
-    totalVerifiedVolumeNgn: payments
-      .filter((p) => p.payment_status === 'PAID')
-      .reduce((sum, p) => sum + p.amount_ngn, 0),
-  };
-
-  return {
-    environment: cfg.interswitchEnvironment,
-    configured: missingCredentials.length === 0,
-    missingCredentials,
-    webhookSecretConfigured: Boolean(cfg.interswitchWebhookSecret),
-    summary,
-    payments,
-    webhookEvents,
   };
 }

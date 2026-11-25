@@ -14,6 +14,7 @@ import {
   VitalsTrendChart,
 } from '../components/monitoring/VitalsTrendChart';
 import { SmartwatchHub } from '../components/monitoring/SmartwatchHub';
+import { SimulatedWatchHeartRateChart } from '../components/monitoring/SimulatedWatchHeartRateChart';
 
 export function MonitoringPage() {
   const {
@@ -217,6 +218,9 @@ export function MonitoringPage() {
 
         {/* Smartwatch Live Vitals & GPS Auto-Escalation Hub */}
         <SmartwatchHub />
+
+        {/* Real-Time Recharts Heart Rate Stream for Simulated Watch Sessions */}
+        <SimulatedWatchHeartRateChart />
 
         {/* Unified Recharts Vitals Trend Line Chart */}
         <VitalsTrendChart

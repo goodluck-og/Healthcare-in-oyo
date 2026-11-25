@@ -49,6 +49,8 @@ describe('HealthConnect Africa Backend API & Auth Security', () => {
     delete process.env.INTERSWITCH_WEBHOOK_SECRET;
     delete process.env.TERMII_API_KEY;
     delete process.env.TWILIO_ACCOUNT_SID;
+    delete process.env.TWILIO_AUTH_TOKEN;
+    delete process.env.TWILIO_FROM_NUMBER;
     delete process.env.VITE_GOOGLE_MAPS_API_KEY;
   });
 
@@ -72,6 +74,7 @@ describe('HealthConnect Africa Backend API & Auth Security', () => {
       interswitchWebhookConfigured: false,
       interswitchMissingCount: 0,
       smsConfigured: false,
+      twilioConfigured: false,
       firebaseProjectId: expect.any(String),
     });
   });

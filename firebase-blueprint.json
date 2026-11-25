@@ -19,7 +19,7 @@
     },
     "UserPrivateInfo": {
       "title": "UserPrivateInfo",
-      "description": "Isolated PII and verification flags restricted to owner and administrators.",
+      "description": "Isolated PII and verification flags strictly restricted to the account owner only.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -143,6 +143,7 @@
         "doctorUid": { "type": "string", "maxLength": 128 },
         "hospitalUid": { "type": "string", "maxLength": 128 },
         "profileId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 120 },
         "doctorId": { "type": "string", "minLength": 1, "maxLength": 80 },
         "doctorName": { "type": "string", "minLength": 2, "maxLength": 120 },
         "specialty": { "type": "string", "minLength": 2, "maxLength": 100 },
@@ -150,6 +151,8 @@
         "city": { "type": "string", "minLength": 2, "maxLength": 60 },
         "date": { "type": "string", "minLength": 4, "maxLength": 32 },
         "time": { "type": "string", "minLength": 2, "maxLength": 32 },
+        "startTime": { "type": "string", "maxLength": 16 },
+        "endTime": { "type": "string", "maxLength": 16 },
         "mode": { "type": "string", "enum": ["In-Person", "Video Telehealth"] },
         "status": { "type": "string", "enum": ["Confirmed", "Pending Payment", "Completed", "Rescheduled", "Cancelled"] },
         "feeNgn": { "type": "number" },
@@ -395,6 +398,104 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["ownerUid", "profileId", "source", "deviceName", "heartRateBpm", "spo2Percent", "recordedAt", "createdAt"]
+    },
+    "PartnerHospital": {
+      "title": "PartnerHospital",
+      "description": "Verified partner hospital or clinic added and managed by the platform hospital administrator.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "type": { "type": "string", "enum": ["Hospital", "Clinic", "Pharmacy", "Laboratory"] },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "state": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "address": { "type": "string", "minLength": 4, "maxLength": 200 },
+        "accreditedBy": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "emergency24h": { "type": "boolean" },
+        "specialties": { "type": "array" },
+        "nhiaAccepted": { "type": "boolean" },
+        "phoneNote": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "addedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type", "city", "state", "address", "accreditedBy", "emergency24h", "specialties", "nhiaAccepted", "phoneNote", "lat", "lng", "addedByUid", "createdAt", "updatedAt"]
+    },
+    "ChatModerationEvent": {
+      "title": "ChatModerationEvent",
+      "description": "Immutable, already-masked chat safety and Sentinel Bot moderation event monitored read-only by the administrator.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "flagType": { "type": "string", "enum": ["pii_masked", "medical_red_flag", "bot_policy_warning"] },
+        "detectedCategories": { "type": "array" },
+        "mode": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "maskedExcerpt": { "type": "string", "minLength": 2, "maxLength": 280 },
+        "botAction": { "type": "string", "maxLength": 80 },
+        "serviceName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUid", "flagType", "detectedCategories", "mode", "maskedExcerpt", "createdAt"]
+    },
+    "PartnerDoctor": {
+      "title": "PartnerDoctor",
+      "description": "Verified partner clinician registered in the public care directory by the administrator or by their verified partner hospital.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "specialty": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "credentials": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "mdcnStatus": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "hospital": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "hospitalId": { "type": "string", "maxLength": 128 },
+        "hospitalOwnerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "state": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "consultationFeeNgn": { "type": "number" },
+        "languages": { "type": "array" },
+        "nextAvailable": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "experienceYears": { "type": "number" },
+        "supportsTelehealth": { "type": "boolean" },
+        "bio": { "type": "string", "minLength": 4, "maxLength": 400 },
+        "avatarVariant": { "type": "string", "enum": ["adewale", "chioma", "ibrahim", "ngozi", "tunde", "amina"] },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "addedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "name", "specialty", "credentials", "mdcnStatus", "hospital", "city", "state",
+        "consultationFeeNgn", "languages", "nextAvailable", "experienceYears",
+        "supportsTelehealth", "bio", "avatarVariant", "lat", "lng", "addedByUid", "createdAt", "updatedAt"
+      ]
+    },
+    "PlatformService": {
+      "title": "PlatformService",
+      "description": "Admin-managed website care team or healthcare service monitored by HealthConnect Sentinel Bot.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "category": { "type": "string", "enum": ["Care Team", "Clinical Service", "Emergency Desk", "Community Support"] },
+        "description": { "type": "string", "minLength": 4, "maxLength": 360 },
+        "leadSpecialty": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "turnaroundLabel": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "botModerationEnabled": { "type": "boolean" },
+        "botAutoMaskPii": { "type": "boolean" },
+        "botAutoEscalateRedFlags": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "addedByUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "name", "category", "description", "leadSpecialty", "city", "turnaroundLabel",
+        "botModerationEnabled", "botAutoMaskPii", "botAutoEscalateRedFlags", "active",
+        "addedByUid", "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -485,6 +586,22 @@
     "/wearableReadings/{readingId}": {
       "schema": { "$ref": "#/entities/WearableReading" },
       "description": "Owner-isolated smartwatch and wearable vital logs."
+    },
+    "/hospitals/{hospitalId}": {
+      "schema": { "$ref": "#/entities/PartnerHospital" },
+      "description": "Publicly readable verified partner hospitals managed exclusively by the administrator."
+    },
+    "/partnerDoctors/{doctorId}": {
+      "schema": { "$ref": "#/entities/PartnerDoctor" },
+      "description": "Publicly readable verified partner doctors registered exclusively by the administrator."
+    },
+    "/platformServices/{serviceId}": {
+      "schema": { "$ref": "#/entities/PlatformService" },
+      "description": "Publicly readable website care teams and services managed by the administrator and monitored by HealthConnect Sentinel Bot."
+    },
+    "/chatModerationEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/ChatModerationEvent" },
+      "description": "Immutable masked chat & Sentinel Bot moderation events monitored read-only by the administrator."
     }
   }
 }

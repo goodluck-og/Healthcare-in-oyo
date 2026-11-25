@@ -1,12 +1,12 @@
 {
-  "projectId": "amped-imprint-mghtt",
-  "appId": "1:681378582777:web:ae12d0d8ca5c91010f9228",
-  "apiKey": "AIzaSyBpC_HShVoqN_u0JU_KxzKY_Yh-Ch3CUs8",
-  "authDomain": "amped-imprint-mghtt.firebaseapp.com",
+  "projectId": "gen-lang-client-0879390019",
+  "appId": "1:1039685556373:web:29425fe16a1802b51aa39c",
+  "apiKey": "AIzaSyCKPP-OBX6dvPCEu9ySEQ-Bd76U0fSEAz4",
+  "authDomain": "gen-lang-client-0879390019.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-healthconnectafr-5f8ef407-e04b-45d7-b888-10a5fdda7b35",
-  "storageBucket": "amped-imprint-mghtt.firebasestorage.app",
-  "messagingSenderId": "681378582777",
+  "storageBucket": "gen-lang-client-0879390019.firebasestorage.app",
+  "messagingSenderId": "1039685556373",
   "measurementId": "",
-  "oAuthClientId": "681378582777-jcif85gt9860bo2k4r2990v9jhm4j98s.apps.googleusercontent.com",
+  "oAuthClientId": "1039685556373-5rs8s6p06bj82l387047h4s1nrng3q2n.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

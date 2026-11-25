@@ -30,14 +30,18 @@ import type {
   Appointment,
   AuditLogEntry,
   BloodPressureReading,
+  ChatModerationEvent,
   CycleLog,
+  Doctor,
   EmergencyContact,
   EmergencyRequest,
+  Facility,
   FamilyProfile,
   FlowIntensity,
   GlucoseReading,
   MedicalDocument,
   MedicationReminder,
+  PlatformService,
   RehabBodyArea,
   RehabSession,
   ReminderCategory,
@@ -133,12 +137,12 @@ export async function ensureUserAccountRecords(params: {
         uid: data.uid,
         displayName: data.displayName,
         role: isBootstrappedAdmin ? 'administrator' : data.role,
-        verifiedRoleStatus: data.verifiedRoleStatus,
+        verifiedRoleStatus: isBootstrappedAdmin ? 'active' : data.verifiedRoleStatus,
         city: data.city,
         facilityOrSpecialty: data.facilityOrSpecialty,
         medicalHistory: data.medicalHistory,
       };
-      if (isBootstrappedAdmin && data.role !== 'administrator') {
+      if (isBootstrappedAdmin && (data.role !== 'administrator' || data.verifiedRoleStatus !== 'active')) {
         await updateDoc(doc(db, 'users', params.uid), {
           role: 'administrator',
           verifiedRoleStatus: 'active',
@@ -165,6 +169,19 @@ export async function ensureUserAccountRecords(params: {
         verifiedRoleStatus: 'active',
         city: safeCity,
       };
+    }
+
+    if (isBootstrappedAdmin) {
+      // Also record /admins/{uid} so both email-based and collection-based admin checks stay in sync
+      await setDoc(
+        doc(db, 'admins', params.uid),
+        {
+          uid: params.uid,
+          email: sanitizeString(params.email, BLUEPRINT_LIMITS.emailMaxLength),
+          grantedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch(() => undefined);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, userPath);
@@ -850,6 +867,15 @@ export async function createAppointmentDoc(
     };
     if (appointment.doctorUid) payload.doctorUid = appointment.doctorUid;
     if (appointment.hospitalUid) payload.hospitalUid = appointment.hospitalUid;
+    if (appointment.patientName) {
+      payload.patientName = sanitizeString(appointment.patientName, 120);
+    }
+    if (appointment.startTime) {
+      payload.startTime = sanitizeString(appointment.startTime, 16);
+    }
+    if (appointment.endTime) {
+      payload.endTime = sanitizeString(appointment.endTime, 16);
+    }
     if (appointment.clinicalNotes) {
       payload.clinicalNotes = sanitizeString(
         appointment.clinicalNotes,
@@ -1065,39 +1091,447 @@ export async function submitRoleVerificationRequest(params: {
   }
 }
 
-export async function reviewRoleRequestAsAdmin(
-  request: RoleRequest,
-  decision: 'approved' | 'rejected'
-): Promise<void> {
-  const reqPath = `roleRequests/${request.id}`;
-  const userPath = `users/${request.uid}`;
+export async function createPartnerHospitalDoc(
+  adminUid: string,
+  input: Omit<Facility, 'id'>
+): Promise<Facility> {
+  const id = makeDocId('hosp');
+  const path = `hospitals/${id}`;
+  const name = sanitizeString(input.name, 140);
+  const city = sanitizeString(input.city, 60);
+  const state = sanitizeString(input.state || 'Oyo State', 60);
+  const address = sanitizeString(input.address, 200);
+  const accreditedBy = sanitizeString(input.accreditedBy || 'HEFAMAA / Oyo State MoH Verified', 120);
+  const phoneNote = sanitizeString(input.phoneNote || '24/7 Reception Desk', 120);
+  const specialties = (input.specialties || [])
+    .map((s) => sanitizeString(s, 60))
+    .filter(Boolean)
+    .slice(0, 12);
+  if (specialties.length === 0) {
+    specialties.push('General Medicine');
+  }
+  const lat = Number.isFinite(input.coordinates?.lat)
+    ? Math.max(-90, Math.min(90, Number(input.coordinates.lat)))
+    : 7.402;
+  const lng = Number.isFinite(input.coordinates?.lng)
+    ? Math.max(-180, Math.min(180, Number(input.coordinates.lng)))
+    : 3.902;
+
+  if (name.length < 2 || city.length < 2 || address.length < 4) {
+    throw new Error('Please provide a valid hospital name, city, and street address.');
+  }
+
   try {
-    await updateDoc(doc(db, 'roleRequests', request.id), {
-      status: decision,
+    await setDoc(doc(db, 'hospitals', id), {
+      name,
+      type: input.type || 'Hospital',
+      city,
+      state: state.length >= 2 ? state : 'Oyo State',
+      address,
+      accreditedBy: accreditedBy.length >= 2 ? accreditedBy : 'Oyo State MoH',
+      emergency24h: Boolean(input.emergency24h),
+      specialties,
+      nhiaAccepted: Boolean(input.nhiaAccepted),
+      phoneNote: phoneNote.length >= 3 ? phoneNote : 'Reception Desk',
+      lat,
+      lng,
+      addedByUid: adminUid,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    if (decision === 'approved') {
-      await updateDoc(doc(db, 'users', request.uid), {
-        role: request.requestedRole,
-        verifiedRoleStatus: 'active',
-        facilityOrSpecialty: sanitizeString(request.organization, 120),
-        updatedAt: serverTimestamp(),
-      });
-    }
+    return {
+      id,
+      name,
+      type: input.type || 'Hospital',
+      city,
+      state: state.length >= 2 ? state : 'Oyo State',
+      address,
+      accreditedBy: accreditedBy.length >= 2 ? accreditedBy : 'Oyo State MoH',
+      emergency24h: Boolean(input.emergency24h),
+      specialties,
+      nhiaAccepted: Boolean(input.nhiaAccepted),
+      phoneNote: phoneNote.length >= 3 ? phoneNote : 'Reception Desk',
+      coordinates: { lat, lng },
+    };
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `${reqPath} -> ${userPath}`);
+    handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 
-export async function adminListAllUsers(): Promise<UserAccount[]> {
+export async function deletePartnerHospitalDoc(hospitalId: string): Promise<void> {
+  const path = `hospitals/${hospitalId}`;
   try {
-    const snap = await getDocs(collection(db, 'users'));
-    return snap.docs.map((d) => {
-      const data = d.data() as UserAccount;
-      return { ...data, uid: d.id };
+    await deleteDoc(doc(db, 'hospitals', hospitalId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribePartnerHospitals(
+  onHospitals: (items: Facility[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'hospitals'), orderBy('createdAt', 'desc')),
+    (snap) => {
+      const list: Facility[] = snap.docs.map((d) => {
+        const data = d.data() as {
+          name: string;
+          type: Facility['type'];
+          city: string;
+          state: string;
+          address: string;
+          accreditedBy: string;
+          emergency24h: boolean;
+          specialties: string[];
+          nhiaAccepted: boolean;
+          phoneNote: string;
+          lat: number;
+          lng: number;
+        };
+        return {
+          id: d.id,
+          name: data.name,
+          type: data.type || 'Hospital',
+          city: data.city,
+          state: data.state,
+          address: data.address,
+          accreditedBy: data.accreditedBy,
+          emergency24h: Boolean(data.emergency24h),
+          specialties: Array.isArray(data.specialties) ? data.specialties : ['General Medicine'],
+          nhiaAccepted: Boolean(data.nhiaAccepted),
+          phoneNote: data.phoneNote,
+          coordinates: {
+            lat: typeof data.lat === 'number' ? data.lat : 7.402,
+            lng: typeof data.lng === 'number' ? data.lng : 3.902,
+          },
+        };
+      });
+      onHospitals(list);
+    },
+    (err) => {
+      // Public directory read may be temporarily offline; fail gracefully without crashing guest UI
+      console.warn('Partner hospitals listener warning:', err?.message || err);
+    }
+  );
+}
+
+export async function createPartnerDoctorDoc(
+  actorUid: string,
+  input: Omit<Doctor, 'id' | 'rating' | 'reviewCount'>
+): Promise<Doctor> {
+  const id = makeDocId('doc');
+  const path = `partnerDoctors/${id}`;
+  const name = sanitizeString(input.name, 120);
+  const specialty = sanitizeString(input.specialty, 100);
+  const credentials = sanitizeString(input.credentials || 'MBBS, FWACP', 120);
+  const mdcnStatus = sanitizeString(input.mdcnStatus || 'MDCN Verified', 80);
+  const hospital = sanitizeString(input.hospital, 140);
+  const hospitalId = input.hospitalId ? sanitizeString(input.hospitalId, 128) : undefined;
+  const hospitalOwnerUid =
+    input.hospitalOwnerUid && BLUEPRINT_LIMITS.idPattern.test(input.hospitalOwnerUid.trim())
+      ? input.hospitalOwnerUid.trim().slice(0, BLUEPRINT_LIMITS.idMaxLength)
+      : undefined;
+  const doctorUid = input.doctorUid ? sanitizeString(input.doctorUid, 128) : undefined;
+  const city = sanitizeString(input.city || 'Ibadan', 60);
+  const state = sanitizeString(input.state || 'Oyo State', 60);
+  const nextAvailable = sanitizeString(input.nextAvailable || 'Today · Online Video', 80);
+  const bio = sanitizeString(input.bio || 'Verified partner clinician available for telehealth and in-person follow-up.', 400);
+  const consultationFeeNgn = Math.max(0, Math.min(500000, Math.round(Number(input.consultationFeeNgn) || 0)));
+  const experienceYears = Math.max(0, Math.min(70, Math.round(Number(input.experienceYears) || 5)));
+  const languages = (input.languages || ['English'])
+    .map((l) => sanitizeString(l, 40))
+    .filter(Boolean)
+    .slice(0, 8);
+  if (languages.length === 0) languages.push('English');
+  const lat = Number.isFinite(input.coordinates?.lat)
+    ? Math.max(-90, Math.min(90, Number(input.coordinates.lat)))
+    : 7.402;
+  const lng = Number.isFinite(input.coordinates?.lng)
+    ? Math.max(-180, Math.min(180, Number(input.coordinates.lng)))
+    : 3.902;
+
+  if (name.length < 2 || specialty.length < 2 || hospital.length < 2) {
+    throw new Error('Provide a valid doctor name, specialty, and affiliated hospital.');
+  }
+
+  try {
+    const payload: Record<string, unknown> = {
+      name,
+      specialty,
+      credentials: credentials.length >= 2 ? credentials : 'MBBS',
+      mdcnStatus: mdcnStatus.length >= 2 ? mdcnStatus : 'MDCN Verified',
+      hospital,
+      city: city.length >= 2 ? city : 'Ibadan',
+      state: state.length >= 2 ? state : 'Oyo State',
+      consultationFeeNgn,
+      languages,
+      nextAvailable: nextAvailable.length >= 2 ? nextAvailable : 'Today',
+      experienceYears,
+      supportsTelehealth: Boolean(input.supportsTelehealth),
+      bio: bio.length >= 4 ? bio : 'Verified clinician.',
+      avatarVariant: input.avatarVariant || 'adewale',
+      lat,
+      lng,
+      addedByUid: actorUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    if (hospitalId) payload.hospitalId = hospitalId;
+    if (hospitalOwnerUid) payload.hospitalOwnerUid = hospitalOwnerUid;
+    if (doctorUid) payload.doctorUid = doctorUid;
+
+    await setDoc(doc(db, 'partnerDoctors', id), payload);
+    return {
+      id,
+      name,
+      specialty,
+      credentials: credentials.length >= 2 ? credentials : 'MBBS',
+      mdcnStatus: mdcnStatus.length >= 2 ? mdcnStatus : 'MDCN Verified',
+      hospital,
+      ...(hospitalId ? { hospitalId } : {}),
+      ...(hospitalOwnerUid ? { hospitalOwnerUid } : {}),
+      ...(doctorUid ? { doctorUid } : {}),
+      addedByUid: actorUid,
+      city: city.length >= 2 ? city : 'Ibadan',
+      state: state.length >= 2 ? state : 'Oyo State',
+      consultationFeeNgn,
+      languages,
+      nextAvailable: nextAvailable.length >= 2 ? nextAvailable : 'Today',
+      experienceYears,
+      supportsTelehealth: Boolean(input.supportsTelehealth),
+      rating: 4.9,
+      reviewCount: 1,
+      bio: bio.length >= 4 ? bio : 'Verified clinician.',
+      avatarVariant: input.avatarVariant || 'adewale',
+      coordinates: { lat, lng },
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deletePartnerDoctorDoc(doctorId: string): Promise<void> {
+  const path = `partnerDoctors/${doctorId}`;
+  try {
+    await deleteDoc(doc(db, 'partnerDoctors', doctorId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribePartnerDoctors(
+  onDoctors: (items: Doctor[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'partnerDoctors'), orderBy('createdAt', 'desc')),
+    (snap) => {
+      const list: Doctor[] = snap.docs.map((d) => {
+        const data = d.data() as {
+          name: string;
+          specialty: string;
+          credentials: string;
+          mdcnStatus: string;
+          hospital: string;
+          hospitalId?: string;
+          hospitalOwnerUid?: string;
+          doctorUid?: string;
+          addedByUid?: string;
+          city: string;
+          state: string;
+          consultationFeeNgn: number;
+          languages: string[];
+          nextAvailable: string;
+          experienceYears: number;
+          supportsTelehealth: boolean;
+          bio: string;
+          avatarVariant: Doctor['avatarVariant'];
+          lat: number;
+          lng: number;
+        };
+        return {
+          id: d.id,
+          name: data.name,
+          specialty: data.specialty,
+          credentials: data.credentials,
+          mdcnStatus: data.mdcnStatus,
+          hospital: data.hospital,
+          ...(data.hospitalId ? { hospitalId: data.hospitalId } : {}),
+          ...(data.hospitalOwnerUid ? { hospitalOwnerUid: data.hospitalOwnerUid } : {}),
+          ...(data.doctorUid ? { doctorUid: data.doctorUid } : {}),
+          ...(data.addedByUid ? { addedByUid: data.addedByUid } : {}),
+          city: data.city,
+          state: data.state,
+          consultationFeeNgn: Number(data.consultationFeeNgn) || 0,
+          languages: Array.isArray(data.languages) ? data.languages : ['English'],
+          nextAvailable: data.nextAvailable || 'Today',
+          experienceYears: Number(data.experienceYears) || 5,
+          supportsTelehealth: Boolean(data.supportsTelehealth),
+          rating: 4.9,
+          reviewCount: 1,
+          bio: data.bio || '',
+          avatarVariant: data.avatarVariant || 'adewale',
+          coordinates: {
+            lat: typeof data.lat === 'number' ? data.lat : 7.402,
+            lng: typeof data.lng === 'number' ? data.lng : 3.902,
+          },
+        };
+      });
+      onDoctors(list);
+    },
+    (err) => {
+      console.warn('Partner doctors listener warning:', err?.message || err);
+    }
+  );
+}
+
+export async function createPlatformServiceDoc(
+  adminUid: string,
+  input: Omit<PlatformService, 'id' | 'addedByUid' | 'createdAt'>
+): Promise<PlatformService> {
+  const id = makeDocId('svc');
+  const path = `platformServices/${id}`;
+  const name = sanitizeString(input.name, 120);
+  const description = sanitizeString(input.description, 360);
+  const leadSpecialty = sanitizeString(input.leadSpecialty || 'General Medicine', 100);
+  const city = sanitizeString(input.city || 'Oyo State (All)', 60);
+  const turnaroundLabel = sanitizeString(input.turnaroundLabel || '24/7 Bot + Clinician Desk', 80);
+
+  if (name.length < 2 || description.length < 4) {
+    throw new Error('Provide a valid service/team name and description.');
+  }
+
+  try {
+    await setDoc(doc(db, 'platformServices', id), {
+      name,
+      category: input.category || 'Care Team',
+      description,
+      leadSpecialty: leadSpecialty.length >= 2 ? leadSpecialty : 'General Medicine',
+      city: city.length >= 2 ? city : 'Ibadan',
+      turnaroundLabel: turnaroundLabel.length >= 2 ? turnaroundLabel : '24/7 Active',
+      botModerationEnabled: Boolean(input.botModerationEnabled),
+      botAutoMaskPii: Boolean(input.botAutoMaskPii),
+      botAutoEscalateRedFlags: Boolean(input.botAutoEscalateRedFlags),
+      active: Boolean(input.active),
+      addedByUid: adminUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return {
+      id,
+      name,
+      category: input.category || 'Care Team',
+      description,
+      leadSpecialty: leadSpecialty.length >= 2 ? leadSpecialty : 'General Medicine',
+      city: city.length >= 2 ? city : 'Ibadan',
+      turnaroundLabel: turnaroundLabel.length >= 2 ? turnaroundLabel : '24/7 Active',
+      botModerationEnabled: Boolean(input.botModerationEnabled),
+      botAutoMaskPii: Boolean(input.botAutoMaskPii),
+      botAutoEscalateRedFlags: Boolean(input.botAutoEscalateRedFlags),
+      active: Boolean(input.active),
+      addedByUid: adminUid,
+      createdAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updatePlatformServiceDoc(
+  serviceId: string,
+  updates: Partial<
+    Pick<
+      PlatformService,
+      'botModerationEnabled' | 'botAutoMaskPii' | 'botAutoEscalateRedFlags' | 'active'
+    >
+  >
+): Promise<void> {
+  const path = `platformServices/${serviceId}`;
+  try {
+    await updateDoc(doc(db, 'platformServices', serviceId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'users');
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deletePlatformServiceDoc(serviceId: string): Promise<void> {
+  const path = `platformServices/${serviceId}`;
+  try {
+    await deleteDoc(doc(db, 'platformServices', serviceId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribePlatformServices(
+  onServices: (items: PlatformService[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'platformServices'), orderBy('createdAt', 'desc')),
+    (snap) => {
+      const list: PlatformService[] = snap.docs.map((d) => {
+        const data = d.data() as Omit<PlatformService, 'id'>;
+        return {
+          ...data,
+          id: d.id,
+          createdAt: tsToIso(data.createdAt),
+        };
+      });
+      onServices(list);
+    },
+    (err) => {
+      console.warn('Platform services listener warning:', err?.message || err);
+    }
+  );
+}
+
+export async function createChatModerationEventDoc(
+  actorUid: string,
+  input: Omit<ChatModerationEvent, 'id' | 'actorUid' | 'createdAt'>
+): Promise<ChatModerationEvent> {
+  const id = makeDocId('cmod');
+  const path = `chatModerationEvents/${id}`;
+  const categories = (input.detectedCategories || [])
+    .map((c) => sanitizeString(c, 40))
+    .filter(Boolean)
+    .slice(0, 6);
+  if (categories.length === 0) {
+    categories.push('policy_filter');
+  }
+  const mode = sanitizeString(input.mode || 'General Symptom Guidance', 100) || 'General Symptom Guidance';
+  const rawExcerpt = sanitizeString(input.maskedExcerpt || 'Masked communication policy trigger', 280);
+  const maskedExcerpt = rawExcerpt.length >= 2 ? rawExcerpt : 'Masked excerpt';
+  const botAction = input.botAction ? sanitizeString(input.botAction, 80) : undefined;
+  const serviceName = input.serviceName ? sanitizeString(input.serviceName, 120) : undefined;
+
+  try {
+    const payload: Record<string, unknown> = {
+      actorUid,
+      flagType: input.flagType,
+      detectedCategories: categories,
+      mode: mode.length >= 2 ? mode : 'General Guidance',
+      maskedExcerpt,
+      createdAt: serverTimestamp(),
+    };
+    if (botAction) payload.botAction = botAction;
+    if (serviceName) payload.serviceName = serviceName;
+
+    await setDoc(doc(db, 'chatModerationEvents', id), payload);
+    return {
+      id,
+      actorUid,
+      flagType: input.flagType,
+      detectedCategories: categories,
+      mode: mode.length >= 2 ? mode : 'General Guidance',
+      maskedExcerpt,
+      botAction,
+      serviceName,
+      createdAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 
@@ -1987,8 +2421,7 @@ export function subscribeRolePortalStreams(
     onSharedDocs?: (items: MedicalDocument[]) => void;
     onHospitalAppointments?: (items: Appointment[]) => void;
     onHospitalEmergencies?: (items: EmergencyRequest[]) => void;
-    onAdminRoleRequests?: (items: RoleRequest[]) => void;
-    onAdminAuditLogs?: (items: AuditLogEntry[]) => void;
+    onAdminChatModerationEvents?: (items: ChatModerationEvent[]) => void;
   }
 ): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
@@ -2068,33 +2501,21 @@ export function subscribeRolePortalStreams(
     );
   }
 
+  // Administrator is strictly scoped to read-only chat moderation monitoring (and hospital directory management).
+  // No access to other users' accounts, roleRequests, auditLogs, or medical records.
   if (role === 'administrator') {
     unsubs.push(
       onSnapshot(
-        query(collection(db, 'roleRequests'), orderBy('createdAt', 'desc')),
+        query(collection(db, 'chatModerationEvents'), orderBy('createdAt', 'desc')),
         (snap) => {
-          callbacks.onAdminRoleRequests?.(
+          callbacks.onAdminChatModerationEvents?.(
             snap.docs.map((d) => {
-              const data = d.data() as Omit<RoleRequest, 'id'>;
+              const data = d.data() as Omit<ChatModerationEvent, 'id'>;
               return { ...data, id: d.id, createdAt: tsToIso(data.createdAt) };
             })
           );
         },
-        (err) => handleFirestoreError(err, OperationType.LIST, 'roleRequests(admin)')
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc')),
-        (snap) => {
-          callbacks.onAdminAuditLogs?.(
-            snap.docs.map((d) => {
-              const data = d.data() as Omit<AuditLogEntry, 'id'>;
-              return { ...data, id: d.id, createdAt: tsToIso(data.createdAt) };
-            })
-          );
-        },
-        (err) => handleFirestoreError(err, OperationType.LIST, 'auditLogs(admin)')
+        (err) => handleFirestoreError(err, OperationType.LIST, 'chatModerationEvents(admin)')
       )
     );
   }

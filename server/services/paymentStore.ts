@@ -176,12 +176,6 @@ export function updatePaymentRecord(
   return updated;
 }
 
-export function listAllPaymentRecords(): ServerPaymentRecord[] {
-  return Array.from(paymentsByRef.values()).sort((a, b) =>
-    b.created_at.localeCompare(a.created_at)
-  );
-}
-
 export function getWebhookEventByEventId(eventId: string): ServerWebhookEventRecord | null {
   return webhookEventsByEventId.get(eventId) || null;
 }
@@ -189,12 +183,6 @@ export function getWebhookEventByEventId(eventId: string): ServerWebhookEventRec
 export function saveWebhookEvent(record: ServerWebhookEventRecord): ServerWebhookEventRecord {
   webhookEventsByEventId.set(record.event_id, record);
   return record;
-}
-
-export function listAllWebhookEvents(): ServerWebhookEventRecord[] {
-  return Array.from(webhookEventsByEventId.values()).sort((a, b) =>
-    b.received_at.localeCompare(a.received_at)
-  );
 }
 
 export function clearPaymentStoreForTests(): void {

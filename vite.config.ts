@@ -55,7 +55,7 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          globIgnores: ['screenshots/**', '**/*.docx', '**/*.zip'],
+          globIgnores: ['screenshots/**', 'docs/**', '**/*.doc', '**/*.docx', '**/*.zip'],
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           cleanupOutdatedCaches: true,
           clientsClaim: true,
@@ -90,7 +90,7 @@ export default defineConfig(() => {
                 },
               },
             },
-            // Privacy-strict: never cache authenticated API calls, Firestore records, Auth, or Payment gateways
+            // Privacy-strict: never cache authenticated API calls, Firestore records, Auth, Drive uploads, or Payment gateways
             {
               urlPattern: ({url}) =>
                 url.pathname.startsWith('/api/') ||
@@ -98,6 +98,7 @@ export default defineConfig(() => {
                 url.hostname.includes('firestore.googleapis.com') ||
                 url.hostname.includes('identitytoolkit.googleapis.com') ||
                 url.hostname.includes('securetoken.googleapis.com') ||
+                url.hostname.includes('www.googleapis.com') ||
                 url.hostname.includes('interswitchng.com'),
               handler: 'NetworkOnly',
             },

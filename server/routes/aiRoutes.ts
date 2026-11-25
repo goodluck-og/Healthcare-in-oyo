@@ -4,6 +4,8 @@ import { medicalRedFlagAiMiddleware } from '../middleware/medicalRedFlagMiddlewa
 import { AiGatewayError, runAiGateway } from '../services/aiGateway.ts';
 import { recordServerAudit } from '../services/auditService.ts';
 import { aiHealthAssistantSchema, drugLookupQuerySchema } from '../validators/schemas.ts';
+import { filterAndMaskChatPii, type ChatPiiCategory } from '../../shared/chatPiiFilter.ts';
+import { evaluateModeratorBot } from '../../shared/moderatorBot.ts';
 
 function pickFirstText(arr?: string[], maxLen = 420): string | undefined {
   const first = arr?.find((item) => typeof item === 'string' && item.trim().length > 0);
@@ -30,6 +32,28 @@ export function createAiRouter(optionalAuthMiddleware: RequestHandler) {
 
       const actorUid = req.authUser?.uid || 'guest-preview';
 
+      // Defense-in-depth: HealthConnect Sentinel Bot masks phone numbers, financial account numbers,
+      // and physical GPS coordinates before forwarding any message to external AI providers.
+      const detectedPiiSet = new Set<ChatPiiCategory>();
+      let moderatorBotAction: string = 'allowed';
+      const sanitizedMessages = parsed.data.messages.map((m) => {
+        const filtered = filterAndMaskChatPii(m.content);
+        for (const cat of filtered.detectedCategories) {
+          detectedPiiSet.add(cat);
+        }
+        if (m.role === 'user') {
+          const decision = evaluateModeratorBot(m.content);
+          if (decision.action !== 'allowed') {
+            moderatorBotAction = decision.action;
+          }
+        }
+        return {
+          role: m.role,
+          content: filtered.maskedText,
+        };
+      });
+      const piiMaskedCategories = Array.from(detectedPiiSet);
+
       try {
         const result = await runAiGateway({
           provider: parsed.data.image ? 'gemini' : parsed.data.provider,
@@ -37,10 +61,7 @@ export function createAiRouter(optionalAuthMiddleware: RequestHandler) {
           mode: parsed.data.mode,
           patientContext: parsed.data.patientContext,
           image: parsed.data.image,
-          messages: parsed.data.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: sanitizedMessages,
         });
 
         recordServerAudit({
@@ -48,7 +69,7 @@ export function createAiRouter(optionalAuthMiddleware: RequestHandler) {
           action: parsed.data.image ? 'AI_MULTIMODAL_HEALTH_QUERY' : 'AI_HEALTH_ASSISTANT_QUERY',
           endpoint: '/api/ai/health-assistant',
           statusCode: 200,
-          summary: `AI response via ${result.provider} (${result.model}) in mode "${parsed.data.mode || 'default'}"${parsed.data.image ? ' [with image]' : ''}.`,
+          summary: `AI response via ${result.provider} (${result.model}) in mode "${parsed.data.mode || 'default'}"${parsed.data.image ? ' [with image]' : ''}${piiMaskedCategories.length > 0 ? ` [Sentinel Bot masked: ${piiMaskedCategories.join(', ')}]` : ''}.`,
         });
 
         res.json({
@@ -56,6 +77,8 @@ export function createAiRouter(optionalAuthMiddleware: RequestHandler) {
           provider: result.provider,
           model: result.model,
           authenticatedUid: req.authUser?.uid || null,
+          piiMaskedCategories,
+          moderatorBotAction,
         });
       } catch (err) {
         if (err instanceof AiGatewayError) {

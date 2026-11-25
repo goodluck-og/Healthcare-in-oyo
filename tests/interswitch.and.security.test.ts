@@ -524,17 +524,13 @@ describe('Interswitch Web Checkout (14 Scenarios) & Enterprise Security Audit Su
     });
     expect(unverifiedAdmin.status).toBe(403);
 
-    // Verified admin -> 200
+    // Verified admin -> 403 (strict least-privilege: hospital directory & read-only chat monitor only)
     const admin = await fetch(`${baseUrl}/api/admin/payments`, {
       headers: { Authorization: 'Bearer valid-admin-token' },
     });
-    expect(admin.status).toBe(200);
-    const adminBody = (await admin.json()) as {
-      configured: boolean;
-      summary: { totalTransactions: number };
-    };
-    expect(adminBody.configured).toBe(true);
-    expect(adminBody.summary.totalTransactions).toBe(0);
+    expect(admin.status).toBe(403);
+    const adminBody = (await admin.json()) as { error: string };
+    expect(adminBody.error).toMatch(/hospital management and read-only chat moderation/i);
 
     // Invalid input rejection (negative amount / bad reference)
     const badAmount = await fetch(`${baseUrl}/api/payments/interswitch/initialize`, {

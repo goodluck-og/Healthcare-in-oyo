@@ -17,6 +17,7 @@ const DESKTOP_LINKS: NavLinkItem[] = [
   { label: 'AI Assistant', route: '/ai-assistant' },
   { label: 'Emergency', route: '/emergency' },
   { label: 'Plans & History', route: '/payments' },
+  { label: 'Project Docs', route: '/about' },
 ];
 
 export function Navbar() {
@@ -63,7 +64,12 @@ export function Navbar() {
         <nav aria-label="Primary navigation" className="hidden xl:flex items-center gap-6">
           {(user.signedIn
             ? DESKTOP_LINKS
-            : DESKTOP_LINKS.filter((item) => item.route === '/' || item.route === '/ai-assistant')
+            : DESKTOP_LINKS.filter(
+                (item) =>
+                  item.route === '/' ||
+                  item.route === '/ai-assistant' ||
+                  item.route === '/about'
+              )
           ).map((item) => {
             const isActive =
               item.hash === undefined && route === item.route;
@@ -102,7 +108,7 @@ export function Navbar() {
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-[#272757] hover:text-[#0F0E47] px-3 py-2 rounded-lg hover:bg-[#F5F6FC] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <User className="w-4 h-4" />
-                  <span>{roleLabel} Dashboard</span>
+                  <span>{user.role === 'administrator' ? 'Admin Console' : `${roleLabel} Dashboard`}</span>
                 </button>
                 <button
                   type="button"

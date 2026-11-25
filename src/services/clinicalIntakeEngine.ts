@@ -12,10 +12,31 @@ export interface ClinicalIntakeResponse {
   matchedOntology: VerifiedDiseaseOntologyEntry[];
 }
 
+const VAGUE_SICK_PHRASE_REGEX =
+  /\b(i feel sick|i am sick|i'm sick|am sick|feeling sick|not feeling well|not feeling fine|feel unwell|feeling unwell|i am unwell|i'm unwell|i am ill|i'm ill|don'?t feel well|don'?t feel good|body is not fine|my body (is )?not (fine|well|good)|feel bad|feeling weak|under the weather|something is wrong with me|help me i'?m sick)\b/i;
+
+const SHORT_SICK_ONLY_REGEX = /^(?:i'?m\s+|i\s+am\s+|am\s+)?(?:very\s+|really\s+|so\s+)?(sick|ill|unwell)[.!?\s]*$/i;
+
 const GENERAL_SICK_PATTERNS = [
-  /\b(i feel sick|i am sick|i'm sick|feeling sick|not feeling well|feel unwell|feeling unwell|i am ill|i'm ill|feel weak|something is wrong with me|help me i'm sick)\b/i,
+  VAGUE_SICK_PHRASE_REGEX,
+  SHORT_SICK_ONLY_REGEX,
   /\b(i have (a )?(fever|headache|cough|stomach pain|body pain|cold|rash|nausea|pain|dizzy|dizziness|vomiting|diarrhea|diarrhoea|burn|cut|injury|accident))\b/i,
 ];
+
+/**
+ * Returns true when the user reports feeling sick or unwell in general terms
+ * without yet naming a specific condition or symptom matched in the ontology.
+ * Always evaluates ONLY the current prompt so earlier chat turns never block intake.
+ */
+export function isVagueSickPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) return false;
+  const matchesSickPhrase =
+    VAGUE_SICK_PHRASE_REGEX.test(trimmed) || SHORT_SICK_ONLY_REGEX.test(trimmed);
+  if (!matchesSickPhrase) return false;
+  const currentPromptMatches = searchMedicalOntology(trimmed, 1);
+  return currentPromptMatches.length === 0;
+}
 
 /**
  * Generates ChatGPT-style step-by-step interactive symptom intake questions
@@ -76,6 +97,28 @@ export function buildInteractiveLocalIntake(params: {
     };
   }
 
+  // 2. Vague opening ("I am sick" / "I feel sick") -> Immediately ask what they are feeling, symptoms, duration, and rest
+  if (isVagueSickPrompt(promptTrimmed)) {
+    return {
+      handled: true,
+      reply: [
+        `I'm really sorry you're not feeling well. Please sit or lie down comfortably, take a few slow sips of clean water, and let's go through a few quick questions so I can help guide you safely.`,
+        `What are you feeling right now? Please tell me your symptoms and a few quick details:`,
+        `1. Main symptoms: Where in your body do you feel unwell (for example: fever or chills, headache, body aches, cough or sore throat, stomach pain, nausea/vomiting, dizziness, or skin rash)?\n2. Timeline & severity: When did it start, and how strong does it feel from 1 (mild) to 10 (severe)?\n3. Rest, fluids & medicines: Are you able to rest and drink fluids right now, and have you taken any medication or do you have any existing health conditions?\n4. Safety check: Are you having any urgent warning signs such as trouble breathing, chest pain, severe pain, persistent vomiting, fainting, or confusion?`,
+        `You can tap one of the symptom options below or type what you feel in your own words. (General health guidance grounded in WHO, DOID & MedlinePlus — not a medical diagnosis. Dial ${emergencyNum} for any emergency.)`,
+      ].join('\n\n'),
+      quickReplies: [
+        'Fever, chills & body aches',
+        'Headache, dizziness or fatigue',
+        'Cough, runny nose & sore throat',
+        'Stomach pain, nausea or diarrhoea',
+        'Skin rash or itching',
+      ],
+      intakeStage: 'triage-start',
+      matchedOntology: [],
+    };
+  }
+
   // Combine recent user messages so multi-turn follow-up remembers context!
   const recentUserContext = [
     ...params.conversationHistory
@@ -86,32 +129,6 @@ export function buildInteractiveLocalIntake(params: {
   ].join(' ');
 
   const ontologyMatches = searchMedicalOntology(recentUserContext, 3);
-  const isVagueSickStart =
-    /\b(i feel sick|i am sick|i'm sick|feeling sick|not feeling well|feel unwell|feeling unwell|i am ill|i'm ill)\b/i.test(
-      promptTrimmed
-    ) && ontologyMatches.length === 0;
-
-  // 2. Vague opening ("I feel sick") -> Start ChatGPT-style clarifying questions
-  if (isVagueSickStart) {
-    return {
-      handled: true,
-      reply: [
-        `I'm sorry you're not feeling well. Let's work through a few quick questions together so I can give you clear, safe health guidance.`,
-        `First, what are your main symptoms right now? (You can tap a quick option below or describe them in your own words.)`,
-        `1. Where do you feel unwell (for example: fever/chills, headache, cough/throat, stomach/nausea, skin rash, or body ache)?\n2. When did it start, and are you having any severe pain or breathing trouble?`,
-        `Note: I provide general health education grounded in WHO, Human Disease Ontology (DOID), and MedlinePlus — never a medical diagnosis. For any urgent danger sign, dial ${emergencyNum}.`,
-      ].join('\n\n'),
-      quickReplies: [
-        'Fever, chills & headache',
-        'Cough, runny nose & sore throat',
-        'Stomach pain, nausea or diarrhoea',
-        'Headache, dizziness or fatigue',
-        'Skin rash or itching',
-      ],
-      intakeStage: 'triage-start',
-      matchedOntology: [],
-    };
-  }
 
   const isSymptomReport =
     GENERAL_SICK_PATTERNS.some((rx) => rx.test(promptTrimmed)) ||

@@ -6,6 +6,7 @@ import {
 import {
   buildInteractiveLocalIntake,
   deriveFollowUpChipsForReply,
+  isVagueSickPrompt,
 } from './clinicalIntakeEngine';
 import {
   detectOnDeviceAiCapability,
@@ -100,7 +101,7 @@ export interface HybridAiRouterDeps {
 
 const HYBRID_SAFETY_SYSTEM_INSTRUCTION = `You are HealthConnect's responsible Universal Health Information Assistant supporting patients and families worldwide.
 Strict Healthcare Safety & Interactive Rules:
-1. When a user says they feel sick or reports a new symptom with limited detail, ask 2 focused clarifying follow-up questions (duration, severity 1-10, associated symptoms) before listing broad education.
+1. When a user says "I am sick", "I feel sick", "not feeling well", or reports vague illness without detailed symptoms, ALWAYS respond with empathy, remind them to rest and sip water, and ask clear numbered follow-up questions first before giving broad advice: (1) What specific symptoms are you feeling right now (fever, headache, cough, body aches, stomach pain, nausea, dizziness, rash)? (2) When did it start and how severe is it (1-10)? (3) Are you able to rest/hydrate and have you taken any medicines or have existing conditions? (4) Any urgent warning signs?
 2. Provide clear, calm, plain-language general health education grounded in WHO, Human Disease Ontology (DOID), and MedlinePlus—NEVER claim a confirmed medical diagnosis, NEVER prescribe medication, and NEVER advise stopping prescribed medicines.
 3. For urgent warning signs (chest pain, shortness of breath, stroke signs, severe bleeding, unconsciousness, seizures, pregnancy emergencies, anaphylaxis), tell the user immediately to call local emergency services (112 / 911 / 999) or open the Emergency Centre.
 4. NEVER invent hospitals, doctor names, or emergency phone numbers.
@@ -352,6 +353,11 @@ async function executeHybridRoute(
 
   // Step 4: Online + Smart Hybrid routing (images go directly to Cloud Vision for visual analysis)
   if (input.routingPreference === 'smart-hybrid' && !input.forceCloudEscalation && !input.image) {
+    // 4.0 Vague illness opening ("I am sick" / "I feel sick") -> immediately start structured interactive symptom intake
+    if (isVagueSickPrompt(input.prompt)) {
+      return respondFromLocalLibrary('local-library');
+    }
+
     // 4a. Prefer on-device Gemini Nano via Firebase AI Logic when browser supports it and task is local-suitable
     if (evaluation.suitableForLocal && onDeviceReady) {
       try {

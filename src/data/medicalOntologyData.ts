@@ -547,6 +547,80 @@ export interface OntologySearchResult {
   score: number;
 }
 
+const ONTOLOGY_STOP_WORDS = new Set([
+  'am',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'been',
+  'but',
+  'by',
+  'can',
+  'do',
+  'does',
+  'feel',
+  'feeling',
+  'fine',
+  'for',
+  'from',
+  'good',
+  'had',
+  'has',
+  'have',
+  'he',
+  'help',
+  'her',
+  'him',
+  'his',
+  'how',
+  'if',
+  'ill',
+  'in',
+  'is',
+  'it',
+  'me',
+  'my',
+  'no',
+  'not',
+  'of',
+  'on',
+  'or',
+  'our',
+  'please',
+  'really',
+  'she',
+  'sick',
+  'so',
+  'some',
+  'that',
+  'the',
+  'their',
+  'them',
+  'they',
+  'this',
+  'to',
+  'unwell',
+  'up',
+  'us',
+  'very',
+  'was',
+  'we',
+  'well',
+  'what',
+  'when',
+  'with',
+  'you',
+  'your',
+]);
+
+function hasWholeWord(haystack: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(haystack);
+}
+
 /**
  * Deterministic, offline-ready search across the curated Human Disease Ontology (DOID),
  * WHO ICD-11, and MedlinePlus verified reference database.
@@ -561,7 +635,9 @@ export function searchMedicalOntology(
   const tokens = normalized
     .replace(/[^a-z0-9:\s-]/g, ' ')
     .split(/\s+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 2 && !ONTOLOGY_STOP_WORDS.has(t));
+
+  if (tokens.length === 0) return [];
 
   const results: OntologySearchResult[] = [];
 
@@ -572,28 +648,33 @@ export function searchMedicalOntology(
     const icdLower = entry.icd11.toLowerCase();
 
     if (normalized.includes(doidLower) || normalized.includes(icdLower)) score += 25;
-    if (nameLower.includes(normalized) || normalized.includes(nameLower)) score += 18;
+    if (
+      (normalized.length >= 4 && hasWholeWord(nameLower, normalized)) ||
+      normalized.includes(nameLower)
+    ) {
+      score += 18;
+    }
 
     for (const syn of entry.synonyms) {
       const s = syn.toLowerCase();
-      if (normalized.includes(s)) score += 14;
+      if (hasWholeWord(normalized, s)) score += 14;
       for (const tok of tokens) {
         if (s === tok) score += 8;
-        else if (s.includes(tok) && tok.length >= 4) score += 3;
+        else if (tok.length >= 4 && hasWholeWord(s, tok)) score += 3;
       }
     }
 
     for (const sym of entry.commonSymptoms) {
       const s = sym.toLowerCase();
-      if (normalized.includes(s)) score += 10;
+      if (hasWholeWord(normalized, s)) score += 10;
       for (const tok of tokens) {
-        if (s.includes(tok) && tok.length >= 4) score += 2.5;
+        if (tok.length >= 4 && hasWholeWord(s, tok)) score += 2.5;
       }
     }
 
     for (const tok of tokens) {
-      if (nameLower.includes(tok)) score += 5;
-      if (entry.definition.toLowerCase().includes(tok) && tok.length >= 4) score += 1.5;
+      if (tok.length >= 3 && hasWholeWord(nameLower, tok)) score += 5;
+      if (tok.length >= 4 && hasWholeWord(entry.definition, tok)) score += 1.5;
     }
 
     if (score >= 5) {

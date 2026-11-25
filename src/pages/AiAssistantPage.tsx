@@ -67,6 +67,11 @@ import {
   type HybridRoutingPreference,
 } from '../services/offlineLibraryStore';
 import type { AiConsultation, ChatImageAttachment } from '../types/healthcare';
+import {
+  filterAndMaskChatPii,
+  type ChatPiiCategory,
+} from '../../shared/chatPiiFilter';
+import { evaluateModeratorBot } from '../../shared/moderatorBot';
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -211,8 +216,8 @@ const WELCOME_MESSAGE: ChatMessage = {
   indicatorLabel: 'Local AI + DOID Ontology: Ready on your device',
   indicatorDetail: 'Verified offline medical guides + interactive intake ready online and offline.',
   quickReplies: [
-    'I feel sick',
-    'Fever & headache',
+    'I am sick',
+    'Fever, chills & body aches',
     'Accident / injury first aid',
     'Explain a lab result',
   ],
@@ -340,6 +345,8 @@ export function AiAssistantPage() {
     aiConsultations,
     saveAiConsultation,
     deleteAiConsultation,
+    allPlatformServices,
+    recordChatModerationEvent,
     integrationStatus,
     isGuestDemo,
   } = useApp();
@@ -393,9 +400,15 @@ export function AiAssistantPage() {
 
   // Chat state
   const [input, setInput] = useState('');
+  const [piiMaskAlert, setPiiMaskAlert] = useState<{
+    categories: ChatPiiCategory[];
+    count: number;
+  } | null>(null);
+  const pendingPiiCategoriesRef = useRef<Set<ChatPiiCategory>>(new Set());
   const [loading, setLoading] = useState(false);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [botPolicyNotice, setBotPolicyNotice] = useState<string | null>(null);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
 
   // Voice dictation state
@@ -422,6 +435,30 @@ export function AiAssistantPage() {
   const [speechSupported] = useState(() => Boolean(getSpeechRecognitionConstructor()));
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [dialogueHaltedForEmergency, setDialogueHaltedForEmergency] = useState(false);
+
+  const formatPiiCategoryLabel = (cat: ChatPiiCategory): string => {
+    if (cat === 'phone') return 'Phone Number';
+    if (cat === 'account') return 'Account / Card Number';
+    return 'Physical Coordinates';
+  };
+
+  const handleChatInputChange = (rawValue: string) => {
+    if (!rawValue.trim()) {
+      setInput('');
+      setPiiMaskAlert(null);
+      pendingPiiCategoriesRef.current.clear();
+      return;
+    }
+    const filtered = filterAndMaskChatPii(rawValue);
+    setInput(filtered.maskedText);
+    if (filtered.hasSensitiveData) {
+      filtered.detectedCategories.forEach((c) => pendingPiiCategoriesRef.current.add(c));
+      setPiiMaskAlert({
+        categories: Array.from(pendingPiiCategoriesRef.current),
+        count: filtered.matchCount,
+      });
+    }
+  };
 
   // Hydrate preferences, bookmarks, offline guides, and on-device Gemini Nano capability
   useEffect(() => {
@@ -680,13 +717,49 @@ export function AiAssistantPage() {
     options?: { isRetry?: boolean; forceCloudEscalation?: boolean }
   ) => {
     const rawContent = (textToSend ?? input).trim();
+    const submitFiltered = filterAndMaskChatPii(rawContent);
+    const sanitizedRawContent = submitFiltered.maskedText.trim();
     const imageToSend = !options?.isRetry && !options?.forceCloudEscalation ? attachedImage : null;
     const content =
-      rawContent ||
+      sanitizedRawContent ||
       (imageToSend
         ? `Please review this uploaded ${imageToSend.categoryHint || 'health/injury'} photo and tell me immediate first-aid steps and emergency warning signs.`
         : '');
     if (!content || loading) return;
+
+    const botDecision = evaluateModeratorBot(rawContent, allPlatformServices);
+    const triggeredPiiCategories = new Set<ChatPiiCategory>(submitFiltered.detectedCategories);
+    if (!textToSend) {
+      pendingPiiCategoriesRef.current.forEach((c) => triggeredPiiCategories.add(c));
+    }
+    if (triggeredPiiCategories.size > 0) {
+      const categoriesList = Array.from(triggeredPiiCategories);
+      setPiiMaskAlert({
+        categories: categoriesList,
+        count: Math.max(1, submitFiltered.matchCount),
+      });
+      void recordChatModerationEvent({
+        flagType: 'pii_masked',
+        detectedCategories: categoriesList,
+        mode,
+        maskedExcerpt: content.slice(0, 260),
+        botAction: 'Sentinel Bot Auto-Masked PII',
+        serviceName: botDecision.routedServiceName || undefined,
+      });
+    } else if (botDecision.action === 'policy_warning') {
+      void recordChatModerationEvent({
+        flagType: 'bot_policy_warning',
+        detectedCategories: botDecision.policyFlags,
+        mode,
+        maskedExcerpt: content.slice(0, 260),
+        botAction: 'Sentinel Bot Policy Warning',
+        serviceName: botDecision.routedServiceName || undefined,
+      });
+      setBotPolicyNotice(botDecision.botNotice);
+    } else {
+      setBotPolicyNotice(null);
+    }
+    pendingPiiCategoriesRef.current.clear();
 
     if (activeTab !== 'chat') {
       setActiveTab('chat');
@@ -768,6 +841,14 @@ export function AiAssistantPage() {
 
       if (hybridResponse.haltEducationalDialogue) {
         setDialogueHaltedForEmergency(true);
+        void recordChatModerationEvent({
+          flagType: 'medical_red_flag',
+          detectedCategories: ['medical_red_flag'],
+          mode,
+          maskedExcerpt: content.slice(0, 260),
+          botAction: 'Sentinel Bot Escalated Red Flag',
+          serviceName: botDecision.routedServiceName || undefined,
+        });
       }
 
       // Persist online signed-in consultations automatically without blocking offline usage
@@ -814,6 +895,7 @@ export function AiAssistantPage() {
     setMessages([WELCOME_MESSAGE]);
     setDialogueHaltedForEmergency(false);
     setErrorMsg(null);
+    setBotPolicyNotice(null);
     setLastFailedPrompt(null);
     setSaveFeedback(null);
     setActiveTab('chat');
@@ -869,8 +951,16 @@ export function AiAssistantPage() {
     const interim = interimTranscript.trim();
     if (interim) {
       const merged = [latestInputRef.current.trim(), interim].filter(Boolean).join(' ');
-      latestInputRef.current = merged;
-      setInput(merged);
+      const filtered = filterAndMaskChatPii(merged);
+      if (filtered.hasSensitiveData) {
+        filtered.detectedCategories.forEach((c) => pendingPiiCategoriesRef.current.add(c));
+        setPiiMaskAlert({
+          categories: Array.from(pendingPiiCategoriesRef.current),
+          count: filtered.matchCount,
+        });
+      }
+      latestInputRef.current = filtered.maskedText;
+      setInput(filtered.maskedText);
       setInterimTranscript('');
     }
     recognitionRef.current?.stop();
@@ -928,8 +1018,16 @@ export function AiAssistantPage() {
         if (finalChunk.trim()) {
           setInput((prev) => {
             const combined = [prev.trim(), finalChunk.trim()].filter(Boolean).join(' ');
-            latestInputRef.current = combined;
-            return combined;
+            const filtered = filterAndMaskChatPii(combined);
+            if (filtered.hasSensitiveData) {
+              filtered.detectedCategories.forEach((c) => pendingPiiCategoriesRef.current.add(c));
+              setPiiMaskAlert({
+                categories: Array.from(pendingPiiCategoriesRef.current),
+                count: filtered.matchCount,
+              });
+            }
+            latestInputRef.current = filtered.maskedText;
+            return filtered.maskedText;
           });
         }
         setInterimTranscript(interimChunk.trim());
@@ -1921,6 +2019,61 @@ export function AiAssistantPage() {
                     </div>
                   )}
 
+                  {botPolicyNotice && (
+                    <div
+                      role="status"
+                      className="rounded-xl bg-indigo-50 border border-indigo-200 px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs text-indigo-950"
+                    >
+                      <div className="flex items-start gap-2">
+                        <ShieldCheck className="w-4 h-4 text-indigo-700 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">HealthConnect Sentinel Bot Policy Notice</p>
+                          <p className="text-[11px] text-indigo-900 mt-0.5">{botPolicyNotice}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBotPolicyNotice(null)}
+                        aria-label="Dismiss Sentinel Bot policy notice"
+                        className="p-1 rounded-lg hover:bg-indigo-200/60 text-indigo-900 cursor-pointer shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {piiMaskAlert && (
+                    <div
+                      role="status"
+                      className="rounded-xl bg-amber-50 border border-amber-300 px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs text-amber-950"
+                    >
+                      <div className="flex items-start gap-2">
+                        <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">
+                            Health-Only Privacy Filter Active — Sensitive Data Masked
+                          </p>
+                          <p className="text-[11px] text-amber-900 mt-0.5">
+                            Detected and automatically masked:{' '}
+                            <strong>
+                              {piiMaskAlert.categories.map(formatPiiCategoryLabel).join(', ')}
+                            </strong>
+                            . Please keep chat messages strictly health-focused (do not share phone
+                            numbers, bank/account numbers, or GPS coordinates in chat).
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPiiMaskAlert(null)}
+                        aria-label="Dismiss privacy filter alert"
+                        className="p-1 rounded-lg hover:bg-amber-200/60 text-amber-900 cursor-pointer shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -1976,7 +2129,7 @@ export function AiAssistantPage() {
                       type="text"
                       aria-label="Ask the Hybrid AI Health Assistant"
                       value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      onChange={(e) => handleChatInputChange(e.target.value)}
                       placeholder={
                         attachedImage
                           ? 'Add details about this photo (or tap Send for immediate first-aid guidance)...'

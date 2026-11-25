@@ -7,6 +7,15 @@ import {
   computeDistanceKm,
   getMapsReadinessSummary,
 } from '../src/services/mapsService';
+import {
+  buildMonthCalendarCells,
+  buildWeekCalendarDays,
+  detectOverlappingAppointmentIds,
+  extractAppointmentTimeWindow,
+  filterHospitalOwnedDoctors,
+  groupPhysicalAppointmentsByDay,
+} from '../src/components/portals/DoctorPhysicalCalendar';
+import type { Appointment } from '../src/types/healthcare';
 
 const rulesPath = path.resolve(process.cwd(), 'firestore.rules');
 const blueprintPath = path.resolve(process.cwd(), 'firebase-blueprint.json');
@@ -144,6 +153,235 @@ describe('Firestore Security Rules, RBAC & Blueprint Validation', () => {
     const longInput = `   ${'A'.repeat(150)}   `;
     const sanitized = sanitizeString(longInput, BLUEPRINT_LIMITS.displayNameMaxLength);
     expect(sanitized.length).toBe(100);
+  });
+
+  it('strictly restricts administrator to partner hospitals and read-only chat moderation (no access to other user accounts or private medical records)', () => {
+    // Users collection: owner-only get, no list, no delete, and no admin override on private PII
+    const usersBlock = rulesText.slice(
+      rulesText.indexOf('match /users/{userId}'),
+      rulesText.indexOf('match /admins/{adminId}')
+    );
+    expect(usersBlock).toContain('allow get: if isValidId(userId) && isOwner(userId);');
+    expect(usersBlock).toContain('allow list: if false;');
+    expect(usersBlock).toContain('allow delete: if false;');
+    const privateBlock = usersBlock.slice(usersBlock.indexOf('match /private/{docId}'));
+    expect(privateBlock).not.toContain('isAdmin()');
+
+    // Personal medical collections must NEVER include isAdmin() bypass
+    for (const col of [
+      'familyProfiles',
+      'bpReadings',
+      'glucoseReadings',
+      'medicalDocuments',
+      'aiConsultations',
+      'wearableReadings',
+      'cycleLogs',
+      'payments',
+    ]) {
+      const start = rulesText.indexOf(`match /${col}/`);
+      expect(start).toBeGreaterThan(-1);
+      const nextMatch = rulesText.indexOf('match /', start + 10);
+      const block = rulesText.slice(start, nextMatch > -1 ? nextMatch : undefined);
+      expect(block).not.toContain('isAdmin()');
+    }
+
+    // Hospitals directory: public get/list, admin-only create/update/delete
+    expect(rulesText).toContain('function isValidPartnerHospital(data)');
+    expect(rulesText).toMatch(/match \/hospitals\/\{hospitalId\}[\s\S]*allow get, list: if true;/);
+    expect(rulesText).toMatch(
+      /match \/hospitals\/\{hospitalId\}[\s\S]*isAdmin\(\) && isValidPartnerHospital\(incoming\(\)\)/
+    );
+
+    // Partner Doctors directory: public get/list; Admin manages all; Verified Hospital manages ONLY its own hospitalOwnerUid doctors
+    expect(rulesText).toContain('function isValidPartnerDoctor(data)');
+    const partnerDoctorsBlock = rulesText.slice(
+      rulesText.indexOf('match /partnerDoctors/{doctorId}'),
+      rulesText.indexOf('match /platformServices/{serviceId}')
+    );
+    expect(partnerDoctorsBlock).toContain('allow get, list: if true;');
+    expect(partnerDoctorsBlock).toContain('isValidPartnerDoctor(incoming())');
+    expect(partnerDoctorsBlock).toContain('isAdmin()');
+    expect(partnerDoctorsBlock).toContain('isVerifiedHospital()');
+    expect(partnerDoctorsBlock).toContain('incoming().hospitalOwnerUid == request.auth.uid');
+    expect(partnerDoctorsBlock).toContain('existing().hospitalOwnerUid == request.auth.uid');
+
+    // Appointments schema & rules support patientName, startTime, endTime and doctor-blocked physical slots
+    expect(rulesText).toContain("'patientName'");
+    expect(rulesText).toContain("'startTime'");
+    expect(rulesText).toContain("'endTime'");
+    expect(rulesText).toContain("incoming().mode == 'In-Person'");
+
+    // Website Care Teams & Platform Services: public get/list, admin-only create/update/delete
+    expect(rulesText).toContain('function isValidPlatformService(data)');
+    expect(rulesText).toMatch(/match \/platformServices\/\{serviceId\}[\s\S]*allow get, list: if true;/);
+    expect(rulesText).toMatch(
+      /match \/platformServices\/\{serviceId\}[\s\S]*isAdmin\(\) && isValidPlatformService\(incoming\(\)\)/
+    );
+
+    // Chat moderation feed: admin read-only monitoring, immutable (no update/delete), supports Sentinel Bot policy warnings
+    expect(rulesText).toContain('function isValidChatModerationEvent(data)');
+    expect(rulesText).toContain("'bot_policy_warning'");
+    expect(rulesText).toMatch(
+      /match \/chatModerationEvents\/\{eventId\}[\s\S]*allow list: if isAdmin\(\);/
+    );
+    expect(rulesText).toMatch(
+      /match \/chatModerationEvents\/\{eventId\}[\s\S]*allow update, delete: if false;/
+    );
+  });
+});
+
+describe('Doctor Physical Appointment Calendar & Hospital-Only Doctor Isolation', () => {
+  it('groups only In-Person physical appointments by day and sorts chronologically by From -> To time', () => {
+    const sample: Appointment[] = [
+      {
+        id: 'apt-video',
+        profileId: 'p1',
+        patientName: 'Video Patient',
+        doctorId: 'doc-1',
+        doctorName: 'Dr. Adewale',
+        specialty: 'Cardiology',
+        facilityName: 'UCH Ibadan',
+        city: 'Ibadan',
+        date: '2026-11-25',
+        time: '08:00 - 08:30 WAT',
+        startTime: '08:00',
+        endTime: '08:30',
+        mode: 'Video Telehealth',
+        status: 'Confirmed',
+        feeNgn: 0,
+        reference: 'VID-001',
+      },
+      {
+        id: 'apt-phy-late',
+        profileId: 'p2',
+        patientName: 'Amina Adeyemi',
+        doctorId: 'doc-1',
+        doctorName: 'Dr. Adewale',
+        specialty: 'Cardiology',
+        facilityName: 'UCH Ibadan',
+        city: 'Ibadan',
+        date: '2026-11-25',
+        time: '14:00 - 14:45 WAT',
+        startTime: '14:00',
+        endTime: '14:45',
+        mode: 'In-Person',
+        status: 'Confirmed',
+        feeNgn: 16000,
+        reference: 'PHY-002',
+      },
+      {
+        id: 'apt-phy-early',
+        profileId: 'p3',
+        patientName: 'Chief Babatunde Alabi',
+        doctorId: 'doc-1',
+        doctorName: 'Dr. Adewale',
+        specialty: 'Cardiology',
+        facilityName: 'UCH Ibadan',
+        city: 'Ibadan',
+        date: '2026-11-25',
+        time: '09:00 - 09:30 WAT',
+        startTime: '09:00',
+        endTime: '09:30',
+        mode: 'In-Person',
+        status: 'Confirmed',
+        feeNgn: 16000,
+        reference: 'PHY-001',
+      },
+      {
+        id: 'apt-phy-nextday',
+        profileId: 'p4',
+        patientName: 'Ngozi Eze',
+        doctorId: 'doc-1',
+        doctorName: 'Dr. Adewale',
+        specialty: 'Cardiology',
+        facilityName: 'UCH Ibadan',
+        city: 'Ibadan',
+        date: '2026-11-26',
+        time: '10:15 - 11:00 WAT',
+        startTime: '10:15',
+        endTime: '11:00',
+        mode: 'In-Person',
+        status: 'Confirmed',
+        feeNgn: 16000,
+        reference: 'PHY-003',
+      },
+    ];
+
+    const groups = groupPhysicalAppointmentsByDay(sample);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].date).toBe('2026-11-25');
+    expect(groups[0].appointments.map((a) => a.id)).toEqual(['apt-phy-early', 'apt-phy-late']);
+    expect(groups[1].date).toBe('2026-11-26');
+
+    const w1 = extractAppointmentTimeWindow(groups[0].appointments[0]);
+    expect(w1.startLabel).toBe('09:00 AM');
+    expect(w1.endLabel).toBe('09:30 AM');
+    expect(w1.durationMinutes).toBe(30);
+
+    const w2 = extractAppointmentTimeWindow(groups[0].appointments[1]);
+    expect(w2.startLabel).toBe('02:00 PM');
+    expect(w2.endLabel).toBe('02:45 PM');
+    expect(w2.durationMinutes).toBe(45);
+  });
+
+  it('filters hospital doctor rosters strictly to doctors owned by that hospital UID', () => {
+    const all = [
+      { id: 'd1', name: 'Dr. UCH One', hospitalOwnerUid: 'hosp-uch-uid' },
+      { id: 'd2', name: 'Dr. Other Hospital', hospitalOwnerUid: 'hosp-other-uid' },
+      { id: 'd3', name: 'Dr. Admin Global' },
+    ];
+    const uchOnly = filterHospitalOwnedDoctors(all, 'hosp-uch-uid');
+    expect(uchOnly.map((d) => d.id)).toEqual(['d1']);
+    expect(filterHospitalOwnedDoctors(all, '')).toEqual([]);
+  });
+
+  it('builds a valid Mon-Sun month calendar grid and marks today accurately', () => {
+    const cells = buildMonthCalendarCells(2026, 10, '2026-11-24'); // November 2026 (0-indexed month 10)
+    expect([35, 42]).toContain(cells.length);
+    const todayCell = cells.find((c) => c.isoDate === '2026-11-24');
+    expect(todayCell).toBeDefined();
+    expect(todayCell?.isToday).toBe(true);
+    expect(todayCell?.inCurrentMonth).toBe(true);
+    expect(cells.filter((c) => c.inCurrentMonth)).toHaveLength(30);
+    expect(cells.filter((c) => c.isToday)).toHaveLength(1);
+  });
+
+  it('builds a 7-day Monday-through-Sunday week grid around any anchor date', () => {
+    const week = buildWeekCalendarDays('2026-11-24', '2026-11-24'); // Tuesday Nov 24, 2026
+    expect(week).toHaveLength(7);
+    expect(week[0].isoDate).toBe('2026-11-23'); // Monday
+    expect(week[1].isoDate).toBe('2026-11-24'); // Tuesday (today)
+    expect(week[1].isToday).toBe(true);
+    expect(week[6].isoDate).toBe('2026-11-29'); // Sunday
+  });
+
+  it('detects overlapping In-Person consultation slots while ignoring non-overlapping and cancelled slots', () => {
+    const base: Omit<Appointment, 'id' | 'startTime' | 'endTime' | 'time' | 'status'> = {
+      profileId: 'p1',
+      patientName: 'Test Patient',
+      doctorId: 'doc-adewale',
+      doctorName: 'Dr. Adewale Ogunleye',
+      specialty: 'Cardiology',
+      facilityName: 'UCH Ibadan',
+      city: 'Ibadan',
+      date: '2026-11-25',
+      mode: 'In-Person',
+      feeNgn: 16000,
+      reference: 'PHY-REF',
+    };
+
+    const appointments: Appointment[] = [
+      { ...base, id: 'a1', startTime: '09:00', endTime: '09:45', time: '09:00 - 09:45 WAT', status: 'Confirmed' },
+      { ...base, id: 'a2', startTime: '09:30', endTime: '10:15', time: '09:30 - 10:15 WAT', status: 'Confirmed' },
+      { ...base, id: 'a3', startTime: '10:15', endTime: '10:45', time: '10:15 - 10:45 WAT', status: 'Confirmed' },
+      { ...base, id: 'a4', startTime: '09:15', endTime: '09:45', time: '09:15 - 09:45 WAT', status: 'Cancelled' },
+    ];
+
+    const conflicts = detectOverlappingAppointmentIds(appointments);
+    expect(conflicts.has('a1')).toBe(true);
+    expect(conflicts.has('a2')).toBe(true);
+    expect(conflicts.has('a3')).toBe(false);
+    expect(conflicts.has('a4')).toBe(false);
   });
 });
 
